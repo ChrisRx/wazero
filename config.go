@@ -168,6 +168,23 @@ type RuntimeConfig interface {
 	// When the invocations of api.Function are closed due to this, sys.ExitError is raised to the callers and
 	// the api.Module from which the functions are derived is made closed.
 	WithCloseOnContextDone(bool) RuntimeConfig
+
+	// WithSkipValidationOnCacheHit skips validating the function bodies of a
+	// module whose compiled functions the engine already holds, in memory or
+	// in the CompilationCache. The module's declarations are still validated.
+	//
+	// Compiled functions are found by the hash of the wasm binary, and they
+	// were compiled from that very binary after it was validated in full, so
+	// validating its function bodies again cannot find anything new. On a
+	// large module that validation is most of CompileModule's time when the
+	// cache hits, since the compiled functions themselves load quickly.
+	//
+	// Note that an entry in a CompilationCache is used whatever the core
+	// features of the runtime that reads it, and with this enabled a module
+	// using a feature the runtime does not enable is no longer rejected on a
+	// cache hit, when its declarations do not show the feature. This is
+	// disabled by default.
+	WithSkipValidationOnCacheHit(bool) RuntimeConfig
 }
 
 // NewRuntimeConfig returns a RuntimeConfig using the compiler if it is supported in this environment,
@@ -181,15 +198,16 @@ func NewRuntimeConfig() RuntimeConfig {
 type newEngine func(context.Context, api.CoreFeatures, filecache.Cache) wasm.Engine
 
 type runtimeConfig struct {
-	enabledFeatures       api.CoreFeatures
-	memoryLimitPages      uint32
-	memoryCapacityFromMax bool
-	engineKind            engineKind
-	dwarfDisabled         bool // negative as defaults to enabled
-	newEngine             newEngine
-	cache                 CompilationCache
-	storeCustomSections   bool
-	ensureTermination     bool
+	enabledFeatures          api.CoreFeatures
+	memoryLimitPages         uint32
+	memoryCapacityFromMax    bool
+	engineKind               engineKind
+	dwarfDisabled            bool // negative as defaults to enabled
+	newEngine                newEngine
+	cache                    CompilationCache
+	storeCustomSections      bool
+	ensureTermination        bool
+	skipValidationOnCacheHit bool
 }
 
 // engineLessConfig helps avoid copy/pasting the wrong defaults.
@@ -262,6 +280,13 @@ func (c *runtimeConfig) WithCoreFeatures(features api.CoreFeatures) RuntimeConfi
 func (c *runtimeConfig) WithCloseOnContextDone(ensure bool) RuntimeConfig {
 	ret := c.clone()
 	ret.ensureTermination = ensure
+	return ret
+}
+
+// WithSkipValidationOnCacheHit implements RuntimeConfig.WithSkipValidationOnCacheHit
+func (c *runtimeConfig) WithSkipValidationOnCacheHit(skip bool) RuntimeConfig {
+	ret := c.clone()
+	ret.skipValidationOnCacheHit = skip
 	return ret
 }
 

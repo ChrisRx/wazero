@@ -179,15 +179,16 @@ func NewRuntimeWithConfig(ctx context.Context, rConfig RuntimeConfig) Runtime {
 	}
 	store := wasm.NewStore(config.enabledFeatures, engine)
 	return &runtime{
-		cache:                 cacheImpl,
-		store:                 store,
-		enabledFeatures:       config.enabledFeatures,
-		memoryLimitPages:      config.memoryLimitPages,
-		memoryCapacityFromMax: config.memoryCapacityFromMax,
-		dwarfDisabled:         config.dwarfDisabled,
-		storeCustomSections:   config.storeCustomSections,
-		ensureTermination:     config.ensureTermination,
-		compiler:              configKind == engineKindCompiler,
+		cache:                    cacheImpl,
+		store:                    store,
+		enabledFeatures:          config.enabledFeatures,
+		memoryLimitPages:         config.memoryLimitPages,
+		memoryCapacityFromMax:    config.memoryCapacityFromMax,
+		dwarfDisabled:            config.dwarfDisabled,
+		storeCustomSections:      config.storeCustomSections,
+		ensureTermination:        config.ensureTermination,
+		skipValidationOnCacheHit: config.skipValidationOnCacheHit,
+		compiler:                 configKind == engineKindCompiler,
 	}
 }
 
@@ -209,7 +210,8 @@ type runtime struct {
 	// See /RATIONALE.md
 	closed atomic.Uint64
 
-	ensureTermination bool
+	ensureTermination        bool
+	skipValidationOnCacheHit bool
 
 	// compiler is whether the engine is the compiler (wazevo).
 	compiler bool
@@ -239,15 +241,42 @@ func (r *runtime) CompileModule(ctx context.Context, binary []byte) (CompiledMod
 		r.memoryLimitPages, r.memoryCapacityFromMax, !r.dwarfDisabled, r.storeCustomSections)
 	if err != nil {
 		return nil, err
-	} else if err = internal.Validate(r.enabledFeatures); err != nil {
+	}
+
+	// The declarations are always validated first, as what follows reads them.
+	// The function bodies wait until the module ID is known, if the
+	// configuration allows it.
+	if r.skipValidationOnCacheHit {
+		err = internal.ValidateDeclarations(r.enabledFeatures)
+	} else {
 		// TODO: decoders should validate before returning, as that allows
 		// them to err with the correct position in the wasm binary.
+		err = internal.Validate(r.enabledFeatures)
+	}
+	if err != nil {
 		return nil, err
 	}
 
 	// Now that the module is validated, cache the memory definitions.
 	// TODO: lazy initialization of memory definition.
 	internal.BuildMemoryDefinitions()
+
+	listeners, err := buildFunctionListeners(ctx, internal)
+	if err != nil {
+		return nil, err
+	}
+	internal.UncheckedMemory = r.compiler && uncheckedMemory(ctx, internal)
+	internal.AssignModuleID(binary, listeners, r.ensureTermination)
+
+	// The engine finds compiled functions by the module ID, a hash of the
+	// binary, and compiled them from that binary after validating it in full.
+	// So the function bodies only need validating when it does not have them:
+	// on a large module they are the majority of the time of a cache hit.
+	if r.skipValidationOnCacheHit && !r.store.Engine.HasCompiledModule(internal) {
+		if err = internal.Validate(r.enabledFeatures); err != nil {
+			return nil, err
+		}
+	}
 
 	c := &compiledModule{module: internal, compiledEngine: r.store.Engine}
 
@@ -258,12 +287,6 @@ func (r *runtime) CompileModule(ctx context.Context, binary []byte) (CompiledMod
 	}
 	c.typeIDs = typeIDs
 
-	listeners, err := buildFunctionListeners(ctx, internal)
-	if err != nil {
-		return nil, err
-	}
-	internal.UncheckedMemory = r.compiler && uncheckedMemory(ctx, internal)
-	internal.AssignModuleID(binary, listeners, r.ensureTermination)
 	if err = r.store.Engine.CompileModule(ctx, internal, listeners, r.ensureTermination); err != nil {
 		return nil, err
 	}

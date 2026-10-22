@@ -493,3 +493,18 @@ func TestEngine_WasmModulesShareCompiledFunctions(t *testing.T) {
 	_, ok = e.compiledFunctions[m.ID]
 	require.False(t, ok)
 }
+
+func TestEngine_HasCompiledModule(t *testing.T) {
+	e := NewEngine(testCtx, api.CoreFeaturesV1, nil).(*engine)
+	m := &wasm.Module{
+		TypeSection:     []wasm.FunctionType{{}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []wasm.Code{{Body: []byte{wasm.OpcodeEnd}}},
+	}
+	m.AssignModuleID([]byte{1, 2, 3}, nil, false)
+	require.False(t, e.HasCompiledModule(m))
+	require.NoError(t, e.CompileModule(testCtx, m, nil, false))
+	require.True(t, e.HasCompiledModule(m))
+	e.DeleteCompiledModule(m)
+	require.False(t, e.HasCompiledModule(m))
+}

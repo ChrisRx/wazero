@@ -62,6 +62,14 @@ func (e *engine) CompiledModuleCount() uint32 {
 	return uint32(len(e.compiledFunctions))
 }
 
+// HasCompiledModule implements the same method as documented on wasm.Engine.
+func (e *engine) HasCompiledModule(module *wasm.Module) bool {
+	e.mux.Lock()
+	defer e.mux.Unlock()
+	_, ok := e.compiledFunctions[module.ID]
+	return ok
+}
+
 // DeleteCompiledModule implements the same method as documented on wasm.Engine.
 func (e *engine) DeleteCompiledModule(m *wasm.Module) {
 	e.deleteCompiledFunctions(m)

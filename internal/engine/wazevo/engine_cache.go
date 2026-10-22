@@ -113,6 +113,26 @@ func (e *engine) getCompiledModuleFromMemory(module *wasm.Module, increaseRefCou
 	return
 }
 
+// HasCompiledModule implements wasm.Engine.
+func (e *engine) HasCompiledModule(module *wasm.Module) bool {
+	if _, ok := e.getCompiledModuleFromMemory(module, false); ok {
+		return true
+	}
+	if e.fileCache == nil || module.IsHostModule {
+		return false
+	}
+	// A stale entry counts as a miss, since CompileModule would compile the
+	// module from its bodies, which must be validated first. Anything else
+	// wrong with the entry makes CompileModule fail rather than compile.
+	content, ok, err := e.fileCache.Get(fileCacheKey(module))
+	if !ok || err != nil {
+		return false
+	}
+	defer content.Close()
+	_, stale, err := readCacheHeader(e.wazeroVersion, content)
+	return !stale && err == nil
+}
+
 func (e *engine) addCompiledModuleToCache(module *wasm.Module, cm *compiledModule) (err error) {
 	if e.fileCache == nil || module.IsHostModule {
 		return
@@ -203,26 +223,24 @@ func serializeCompiledModule(wazeroVersion string, cm *compiledModule) io.Reader
 	return bytes.NewReader(buf.Bytes())
 }
 
-func deserializeCompiledModule(wazeroVersion string, rc io.ReadCloser) (cm *compiledModule, staleCache bool, err error) {
-	defer rc.Close()
-	// The entry is decoded in many small fields, so buffer it rather than
-	// issuing one read per field against the underlying cache file.
-	reader := bufio.NewReader(rc)
+// readCacheHeader reads the part of a cache entry before the native code, and
+// returns the number of functions in the entry, which is meaningless if the
+// entry is stale or err is not nil.
+func readCacheHeader(wazeroVersion string, r io.Reader) (functionsNum uint32, staleCache bool, err error) {
 	cacheHeaderSize := len(magic) + 1 /* version size */ + len(wazeroVersion) + 4 /* number of functions */
 
-	// Read the header before the native code.
 	header := make([]byte, cacheHeaderSize)
-	n, err := io.ReadFull(reader, header)
+	n, err := io.ReadFull(r, header)
 	if err != nil && err != io.ErrUnexpectedEOF {
-		return nil, false, fmt.Errorf("compilationcache: error reading header: %v", err)
+		return 0, false, fmt.Errorf("compilationcache: error reading header: %v", err)
 	}
 
 	if n != cacheHeaderSize {
-		return nil, false, fmt.Errorf("compilationcache: invalid header length: %d", n)
+		return 0, false, fmt.Errorf("compilationcache: invalid header length: %d", n)
 	}
 
 	if !bytes.Equal(header[:len(magic)], magic) {
-		return nil, false, fmt.Errorf(
+		return 0, false, fmt.Errorf(
 			"compilationcache: invalid magic number: got %s but want %s", magic, header[:len(magic)])
 	}
 
@@ -231,14 +249,26 @@ func deserializeCompiledModule(wazeroVersion string, rc io.ReadCloser) (cm *comp
 
 	cachedVersionBegin, cachedVersionEnd := len(magic)+1, len(magic)+1+versionSize
 	if cachedVersionEnd >= len(header) {
-		staleCache = true
-		return
+		return 0, true, nil
 	} else if cachedVersion := string(header[cachedVersionBegin:cachedVersionEnd]); cachedVersion != wazeroVersion {
-		staleCache = true
-		return
+		return 0, true, nil
 	}
 
-	functionsNum := binary.LittleEndian.Uint32(header[len(header)-4:])
+	return binary.LittleEndian.Uint32(header[len(header)-4:]), false, nil
+}
+
+func deserializeCompiledModule(wazeroVersion string, rc io.ReadCloser) (cm *compiledModule, staleCache bool, err error) {
+	defer rc.Close()
+	// The entry is decoded in many small fields, so buffer it rather than
+	// issuing one read per field against the underlying cache file.
+	reader := bufio.NewReader(rc)
+
+	// Read the header before the native code.
+	functionsNum, staleCache, err := readCacheHeader(wazeroVersion, reader)
+	if err != nil || staleCache {
+		return nil, staleCache, err
+	}
+
 	cm = &compiledModule{functionOffsets: make([]int, functionsNum), executables: &executables{}}
 
 	var eightBytes [8]byte
