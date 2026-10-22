@@ -454,6 +454,9 @@ func (e *mockModuleEngine) LookupFunction(_ *TableInstance, _ FunctionTypeID, of
 // CompiledModuleCount implements the same method as documented on wasm.Engine.
 func (e *mockEngine) CompiledModuleCount() uint32 { return 0 }
 
+// HasCompiledModule implements the same method as documented on wasm.Engine.
+func (e *mockEngine) HasCompiledModule(*Module) bool { return false }
+
 // DeleteCompiledModule implements the same method as documented on wasm.Engine.
 func (e *mockEngine) DeleteCompiledModule(*Module) {}
 

@@ -9,7 +9,10 @@ import (
 	goruntime "runtime"
 	"testing"
 
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/internal/platform"
+	"github.com/tetratelabs/wazero/internal/testing/binaryencoding"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
@@ -131,6 +134,118 @@ func TestCompilationCache(t *testing.T) {
 		require.Equal(t, compiledModule0.compiledEngine, compiledModule1.compiledEngine)
 		require.Equal(t, compiledModule1.compiledEngine, compiledModule2.compiledEngine)
 	})
+}
+
+// TestCompilationCache_skipValidationOnCacheHit checks that a runtime set to
+// skip validation on a cache hit still validates what it has to compile, and
+// that what it finds in the cache compiles and runs.
+func TestCompilationCache_skipValidationOnCacheHit(t *testing.T) {
+	if !platform.CompilerSupported() {
+		t.Skip()
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	// Invalid in its one function body alone: the body leaves a value on the
+	// stack. Every declaration is fine.
+	invalid := binaryencoding.EncodeModule(&wasm.Module{
+		TypeSection:     []wasm.FunctionType{{}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []wasm.Code{{Body: []byte{wasm.OpcodeI32Const, 0, wasm.OpcodeEnd}}},
+	})
+
+	// Fill the cache from one runtime, which validates everything.
+	first, err := NewCompilationCacheWithDir(dir)
+	require.NoError(t, err)
+	r := NewRuntimeWithConfig(ctx, NewRuntimeConfig().WithCompilationCache(first))
+	_, err = r.CompileModule(ctx, facWasm)
+	require.NoError(t, err)
+	_, err = r.CompileModule(ctx, invalid)
+	require.Error(t, err)
+	require.NoError(t, r.Close(ctx))
+	require.NoError(t, first.Close(ctx))
+
+	// A runtime on a fresh cache object over the same directory finds fac in
+	// the file cache alone, and has nothing in memory.
+	second, err := NewCompilationCacheWithDir(dir)
+	require.NoError(t, err)
+	defer second.Close(ctx)
+	r = NewRuntimeWithConfig(ctx, NewRuntimeConfig().WithCompilationCache(second).WithSkipValidationOnCacheHit(true))
+	defer r.Close(ctx)
+
+	compiled, err := r.CompileModule(ctx, facWasm)
+	require.NoError(t, err)
+	require.True(t, r.(*runtime).store.Engine.HasCompiledModule(compiled.(*compiledModule).module))
+	mod, err := r.InstantiateModule(ctx, compiled, NewModuleConfig())
+	require.NoError(t, err)
+	results, err := mod.ExportedFunction("fac-ssa").Call(ctx, 5)
+	require.NoError(t, err)
+	require.Equal(t, uint64(120), results[0])
+
+	// The invalid module is not in the cache, so its body is validated.
+	_, err = r.CompileModule(ctx, invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid function")
+}
+
+// TestCompilationCache_skipValidationOnCacheHit_bodies checks that the bodies
+// really are not validated on a hit. A feature used only in a function body
+// is how that shows, as the documentation of the option says.
+func TestCompilationCache_skipValidationOnCacheHit_bodies(t *testing.T) {
+	if !platform.CompilerSupported() {
+		t.Skip()
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	bin := binaryencoding.EncodeModule(&wasm.Module{
+		TypeSection:     []wasm.FunctionType{{Results: []wasm.ValueType{wasm.ValueTypeI32}}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []wasm.Code{{Body: []byte{wasm.OpcodeI32Const, 0, wasm.OpcodeI32Extend8S, wasm.OpcodeEnd}}},
+	})
+
+	compile := func(features api.CoreFeatures, skip bool) error {
+		c, err := NewCompilationCacheWithDir(dir)
+		require.NoError(t, err)
+		defer c.Close(ctx)
+		r := NewRuntimeWithConfig(ctx, NewRuntimeConfig().WithCoreFeatures(features).
+			WithCompilationCache(c).WithSkipValidationOnCacheHit(skip))
+		defer r.Close(ctx)
+		_, err = r.CompileModule(ctx, bin)
+		return err
+	}
+
+	// A miss validates the bodies, whatever the option.
+	require.Error(t, compile(api.CoreFeaturesV1, true))
+
+	require.NoError(t, compile(api.CoreFeaturesV2, false))
+
+	// On a hit the bodies are validated unless the option says otherwise.
+	require.Error(t, compile(api.CoreFeaturesV1, false))
+	require.NoError(t, compile(api.CoreFeaturesV1, true))
+}
+
+// TestCompileModule_listenersAfterDeclarations checks that an invalid module
+// is rejected before function listeners read its declarations.
+func TestCompileModule_listenersAfterDeclarations(t *testing.T) {
+	bin := binaryencoding.EncodeModule(&wasm.Module{
+		TypeSection:     []wasm.FunctionType{{}},
+		FunctionSection: []wasm.Index{5},
+		CodeSection:     []wasm.Code{{Body: []byte{wasm.OpcodeEnd}}},
+	})
+	ctx := experimental.WithFunctionListenerFactory(context.Background(),
+		experimental.FunctionListenerFactoryFunc(func(api.FunctionDefinition) experimental.FunctionListener {
+			return nil
+		}))
+
+	for _, skip := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip=%v", skip), func(t *testing.T) {
+			r := NewRuntimeWithConfig(ctx, NewRuntimeConfig().WithSkipValidationOnCacheHit(skip))
+			defer r.Close(ctx)
+			_, err := r.CompileModule(ctx, bin)
+			require.EqualError(t, err, "invalid function[0]: type section index 5 out of range")
+		})
+	}
 }
 
 func getCacheSharedRuntimes(ctx context.Context, t *testing.T) (foo, bar *runtime) {

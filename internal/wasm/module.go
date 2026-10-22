@@ -278,7 +278,22 @@ func (m *Module) typeIndexOfFunction(funcIdx Index) (Index, bool) {
 	return typeIdx, true
 }
 
+// Validate checks that the module is well-formed: its declarations and its
+// function bodies.
 func (m *Module) Validate(enabledFeatures api.CoreFeatures) error {
+	return m.validate(enabledFeatures, true)
+}
+
+// ValidateDeclarations checks everything Validate does except the function
+// bodies, which on a large module is nearly all of Validate's time. It is for
+// a module whose compiled functions the engine already holds: those were
+// compiled from the same bytes, identified by Module.ID, after a full
+// validation, so checking the bodies again proves nothing new.
+func (m *Module) ValidateDeclarations(enabledFeatures api.CoreFeatures) error {
+	return m.validate(enabledFeatures, false)
+}
+
+func (m *Module) validate(enabledFeatures api.CoreFeatures, bodies bool) error {
 	for i := range m.TypeSection {
 		tp := &m.TypeSection[i]
 		tp.CacheNumInUint64()
@@ -318,7 +333,7 @@ func (m *Module) Validate(enabledFeatures api.CoreFeatures) error {
 	}
 
 	if m.CodeSection != nil {
-		if err = m.validateFunctions(enabledFeatures, functions, globals, memory, tables, tags, MaximumFunctionIndex); err != nil {
+		if err = m.validateFunctions(enabledFeatures, functions, globals, memory, tables, tags, MaximumFunctionIndex, bodies); err != nil {
 			return err
 		}
 	} // No need to validate host functions as NewHostModule validates
@@ -425,7 +440,9 @@ func (m *Module) validateGlobals(globals []GlobalType, numFuncts, maxGlobals uin
 	return nil
 }
 
-func (m *Module) validateFunctions(enabledFeatures api.CoreFeatures, functions []Index, globals []GlobalType, memory *Memory, tables []Table, tags []Index, maximumFunctionIndex uint32) error {
+// validateFunctions checks the function and code sections, and the body of
+// each function when bodies is true.
+func (m *Module) validateFunctions(enabledFeatures api.CoreFeatures, functions []Index, globals []GlobalType, memory *Memory, tables []Table, tags []Index, maximumFunctionIndex uint32, bodies bool) error {
 	if uint32(len(functions)) > maximumFunctionIndex {
 		return fmt.Errorf("too many functions (%d) in a module", len(functions))
 	}
@@ -456,7 +473,7 @@ func (m *Module) validateFunctions(enabledFeatures api.CoreFeatures, functions [
 			return fmt.Errorf("invalid %s: type section index %d out of range", m.funcDesc(SectionIDFunction, Index(idx)), typeIndex)
 		}
 		c := &m.CodeSection[idx]
-		if c.GoFunc != nil {
+		if c.GoFunc != nil || !bodies {
 			continue
 		}
 		if err = m.validateFunction(vs, enabledFeatures, Index(idx), functions, globals, memory, tables, tags, declaredFuncIndexes, br); err != nil {

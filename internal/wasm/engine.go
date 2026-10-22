@@ -19,6 +19,11 @@ type Engine interface {
 	// CompiledModuleCount is exported for testing, to track the size of the compilation cache.
 	CompiledModuleCount() uint32
 
+	// HasCompiledModule reports whether CompileModule would find the module's
+	// compiled functions already at hand, in memory or in the compilation
+	// cache, rather than compile them.
+	HasCompiledModule(module *Module) bool
+
 	// DeleteCompiledModule releases compilation caches for the given module (source).
 	// Note: it is safe to call this function for a module from which module instances are instantiated even when these
 	// module instances have outstanding calls.
