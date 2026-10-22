@@ -461,6 +461,24 @@ case, a user can use multiple runtimes until "multi-store" is better understood.
 If later, we have demand for multiple stores, that can be accomplished by overload. e.g. `Runtime.InstantiateInStore` or
 `Runtime.Store(name) Store`.
 
+### Why can function body validation be skipped on a compilation cache hit?
+`RuntimeConfig.WithSkipValidationOnCacheHit` lets `CompileModule` skip validating the function bodies of a module whose
+compiled functions the engine already holds, in memory or in a `CompilationCache`. It still validates the declarations.
+
+Validation is required by the specification before a module is instantiated, and wazero always performs it when it
+compiles. The engine finds compiled functions by `Module.ID`, a SHA-256 of the wasm binary, so a hit means the engine
+compiled this very binary earlier, after validating it in full. Validating its bodies again cannot find anything the
+earlier validation did not. The cache already trusts the machine code it holds, which is more than it would trust by
+believing the earlier validation.
+
+This matters for large modules: on a 40MB module, function body validation is roughly 0.4 seconds of a cache hit that
+otherwise takes about 50 milliseconds to load. A process that starts, runs the module once and exits pays this on every
+start.
+
+It is not the default because a cache entry is used whatever the core features of the runtime that reads it. With this
+enabled, a module using a feature the runtime does not enable, in a function body alone, is no longer rejected on a hit.
+A runtime that always has the same features, as most do, loses nothing.
+
 ## Exit
 
 ### Why do we only return a `sys.ExitError` on a non-zero exit code?

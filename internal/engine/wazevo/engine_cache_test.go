@@ -2,12 +2,14 @@ package wazevo
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"hash/crc32"
 	"io"
 	"testing"
 	"testing/iotest"
 
+	"github.com/tetratelabs/wazero/internal/filecache"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/u32"
 	"github.com/tetratelabs/wazero/internal/u64"
@@ -341,4 +343,35 @@ func Test_fileCacheKey(t *testing.T) {
 	result := fileCacheKey(m)
 	require.Equal(t, original, m.ID)
 	require.NotEqual(t, original, result)
+}
+
+func TestEngine_HasCompiledModule(t *testing.T) {
+	ctx := context.Background()
+	m := &wasm.Module{
+		TypeSection:     []wasm.FunctionType{{}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []wasm.Code{{Body: []byte{wasm.OpcodeEnd}}},
+	}
+	m.AssignModuleID([]byte{1, 2, 3}, nil, false)
+
+	t.Run("in memory", func(t *testing.T) {
+		e := NewEngine(ctx, 0, nil).(*engine)
+		require.False(t, e.HasCompiledModule(m))
+		require.NoError(t, e.CompileModule(ctx, m, nil, false))
+		require.True(t, e.HasCompiledModule(m))
+		e.DeleteCompiledModule(m)
+		require.False(t, e.HasCompiledModule(m))
+	})
+
+	t.Run("file cache", func(t *testing.T) {
+		fc := filecache.New(t.TempDir())
+		e := NewEngine(ctx, 0, fc).(*engine)
+		require.False(t, e.HasCompiledModule(m))
+		require.NoError(t, e.CompileModule(ctx, m, nil, false))
+
+		// Another engine on the same file cache has it without compiling.
+		other := NewEngine(ctx, 0, fc).(*engine)
+		require.True(t, other.HasCompiledModule(m))
+		require.False(t, other.HasCompiledModule(&wasm.Module{ID: wasm.ModuleID{1}}))
+	})
 }

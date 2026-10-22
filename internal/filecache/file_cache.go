@@ -40,6 +40,16 @@ func (fc *fileCache) Get(key Key) (content io.ReadCloser, ok bool, err error) {
 	}
 }
 
+func (fc *fileCache) Has(key Key) (ok bool, err error) {
+	_, err = os.Stat(fc.path(key))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (fc *fileCache) Add(key Key, content io.Reader) (err error) {
 	path := fc.path(key)
 	dirPath, fileName := filepath.Split(path)

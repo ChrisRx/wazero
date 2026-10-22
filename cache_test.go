@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tetratelabs/wazero/internal/platform"
+	"github.com/tetratelabs/wazero/internal/testing/binaryencoding"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
@@ -131,6 +132,58 @@ func TestCompilationCache(t *testing.T) {
 		require.Equal(t, compiledModule0.compiledEngine, compiledModule1.compiledEngine)
 		require.Equal(t, compiledModule1.compiledEngine, compiledModule2.compiledEngine)
 	})
+}
+
+// TestCompilationCache_skipValidationOnCacheHit checks that a runtime set to
+// skip validation on a cache hit still validates what it has to compile, and
+// that what it finds in the cache compiles and runs.
+func TestCompilationCache_skipValidationOnCacheHit(t *testing.T) {
+	if !platform.CompilerSupported() {
+		t.Skip()
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	// Invalid in its one function body alone: the body leaves a value on the
+	// stack. Every declaration is fine.
+	invalid := binaryencoding.EncodeModule(&wasm.Module{
+		TypeSection:     []wasm.FunctionType{{}},
+		FunctionSection: []wasm.Index{0},
+		CodeSection:     []wasm.Code{{Body: []byte{wasm.OpcodeI32Const, 0, wasm.OpcodeEnd}}},
+	})
+
+	// Fill the cache from one runtime, which validates everything.
+	first, err := NewCompilationCacheWithDir(dir)
+	require.NoError(t, err)
+	r := NewRuntimeWithConfig(ctx, NewRuntimeConfig().WithCompilationCache(first))
+	_, err = r.CompileModule(ctx, facWasm)
+	require.NoError(t, err)
+	_, err = r.CompileModule(ctx, invalid)
+	require.Error(t, err)
+	require.NoError(t, r.Close(ctx))
+	require.NoError(t, first.Close(ctx))
+
+	// A runtime on a fresh cache object over the same directory finds fac in
+	// the file cache alone, and has nothing in memory.
+	second, err := NewCompilationCacheWithDir(dir)
+	require.NoError(t, err)
+	defer second.Close(ctx)
+	r = NewRuntimeWithConfig(ctx, NewRuntimeConfig().WithCompilationCache(second).WithSkipValidationOnCacheHit(true))
+	defer r.Close(ctx)
+
+	compiled, err := r.CompileModule(ctx, facWasm)
+	require.NoError(t, err)
+	require.True(t, r.(*runtime).store.Engine.HasCompiledModule(compiled.(*compiledModule).module))
+	mod, err := r.InstantiateModule(ctx, compiled, NewModuleConfig())
+	require.NoError(t, err)
+	results, err := mod.ExportedFunction("fac-ssa").Call(ctx, 5)
+	require.NoError(t, err)
+	require.Equal(t, uint64(120), results[0])
+
+	// The invalid module is not in the cache, so its body is validated.
+	_, err = r.CompileModule(ctx, invalid)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid function")
 }
 
 func getCacheSharedRuntimes(ctx context.Context, t *testing.T) (foo, bar *runtime) {

@@ -115,6 +115,31 @@ func TestFileCache_Get(t *testing.T) {
 	})
 }
 
+func TestFileCache_Has(t *testing.T) {
+	fc := newFileCache(t.TempDir())
+	id := Key{1, 2, 3}
+
+	t.Run("not exist", func(t *testing.T) {
+		ok, err := fc.Has(id)
+		require.NoError(t, err)
+		require.False(t, ok)
+	})
+
+	t.Run("exists", func(t *testing.T) {
+		require.NoError(t, fc.Add(id, bytes.NewReader([]byte{1, 2, 3})))
+		ok, err := fc.Has(id)
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+
+	t.Run("deleted", func(t *testing.T) {
+		require.NoError(t, fc.Delete(id))
+		ok, err := fc.Has(id)
+		require.NoError(t, err)
+		require.False(t, ok)
+	})
+}
+
 func TestFileCache_path(t *testing.T) {
 	fc := &fileCache{dirPath: "/tmp/.wazero"}
 	actual := fc.path(Key{1, 2, 3, 4, 5})

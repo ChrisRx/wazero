@@ -72,6 +72,11 @@ func TestRuntimeConfig(t *testing.T) {
 			with:     func(c RuntimeConfig) RuntimeConfig { return c.WithCloseOnContextDone(true) },
 			expected: &runtimeConfig{ensureTermination: true},
 		},
+		{
+			name:     "WithSkipValidationOnCacheHit",
+			with:     func(c RuntimeConfig) RuntimeConfig { return c.WithSkipValidationOnCacheHit(true) },
+			expected: &runtimeConfig{skipValidationOnCacheHit: true},
+		},
 	}
 
 	for _, tt := range tests {

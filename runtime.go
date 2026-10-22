@@ -179,14 +179,15 @@ func NewRuntimeWithConfig(ctx context.Context, rConfig RuntimeConfig) Runtime {
 	}
 	store := wasm.NewStore(config.enabledFeatures, engine)
 	return &runtime{
-		cache:                 cacheImpl,
-		store:                 store,
-		enabledFeatures:       config.enabledFeatures,
-		memoryLimitPages:      config.memoryLimitPages,
-		memoryCapacityFromMax: config.memoryCapacityFromMax,
-		dwarfDisabled:         config.dwarfDisabled,
-		storeCustomSections:   config.storeCustomSections,
-		ensureTermination:     config.ensureTermination,
+		cache:                    cacheImpl,
+		store:                    store,
+		enabledFeatures:          config.enabledFeatures,
+		memoryLimitPages:         config.memoryLimitPages,
+		memoryCapacityFromMax:    config.memoryCapacityFromMax,
+		dwarfDisabled:            config.dwarfDisabled,
+		storeCustomSections:      config.storeCustomSections,
+		ensureTermination:        config.ensureTermination,
+		skipValidationOnCacheHit: config.skipValidationOnCacheHit,
 	}
 }
 
@@ -208,7 +209,8 @@ type runtime struct {
 	// See /RATIONALE.md
 	closed atomic.Uint64
 
-	ensureTermination bool
+	ensureTermination        bool
+	skipValidationOnCacheHit bool
 }
 
 // Module implements Runtime.Module.
@@ -235,9 +237,27 @@ func (r *runtime) CompileModule(ctx context.Context, binary []byte) (CompiledMod
 		r.memoryLimitPages, r.memoryCapacityFromMax, !r.dwarfDisabled, r.storeCustomSections)
 	if err != nil {
 		return nil, err
-	} else if err = internal.Validate(r.enabledFeatures); err != nil {
+	}
+
+	listeners, err := buildFunctionListeners(ctx, internal)
+	if err != nil {
+		return nil, err
+	}
+	internal.AssignModuleID(binary, listeners, r.ensureTermination)
+
+	// The engine finds compiled functions by the module ID, a hash of the
+	// binary, and compiled them from that binary after validating it in full.
+	// So when it has them, only the declarations need validating, if the
+	// configuration allows: on a large module the function bodies are nearly
+	// all of the time of a cache hit.
+	if r.skipValidationOnCacheHit && r.store.Engine.HasCompiledModule(internal) {
+		err = internal.ValidateDeclarations(r.enabledFeatures)
+	} else {
 		// TODO: decoders should validate before returning, as that allows
 		// them to err with the correct position in the wasm binary.
+		err = internal.Validate(r.enabledFeatures)
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -254,11 +274,6 @@ func (r *runtime) CompileModule(ctx context.Context, binary []byte) (CompiledMod
 	}
 	c.typeIDs = typeIDs
 
-	listeners, err := buildFunctionListeners(ctx, internal)
-	if err != nil {
-		return nil, err
-	}
-	internal.AssignModuleID(binary, listeners, r.ensureTermination)
 	if err = r.store.Engine.CompileModule(ctx, internal, listeners, r.ensureTermination); err != nil {
 		return nil, err
 	}

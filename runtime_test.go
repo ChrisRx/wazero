@@ -800,6 +800,12 @@ func (e *mockEngine) CompiledModuleCount() uint32 {
 	return uint32(len(e.cachedModules))
 }
 
+// HasCompiledModule implements the same method as documented on wasm.Engine.
+func (e *mockEngine) HasCompiledModule(module *wasm.Module) bool {
+	_, ok := e.cachedModules[module]
+	return ok
+}
+
 // DeleteCompiledModule implements the same method as documented on wasm.Engine.
 func (e *mockEngine) DeleteCompiledModule(module *wasm.Module) {
 	delete(e.cachedModules, module)

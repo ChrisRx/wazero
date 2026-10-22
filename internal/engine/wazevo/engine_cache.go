@@ -113,6 +113,18 @@ func (e *engine) getCompiledModuleFromMemory(module *wasm.Module, increaseRefCou
 	return
 }
 
+// HasCompiledModule implements wasm.Engine.
+func (e *engine) HasCompiledModule(module *wasm.Module) bool {
+	if _, ok := e.getCompiledModuleFromMemory(module, false); ok {
+		return true
+	}
+	if e.fileCache == nil || module.IsHostModule {
+		return false
+	}
+	ok, err := e.fileCache.Has(fileCacheKey(module))
+	return ok && err == nil
+}
+
 func (e *engine) addCompiledModuleToCache(module *wasm.Module, cm *compiledModule) (err error) {
 	if e.fileCache == nil || module.IsHostModule {
 		return

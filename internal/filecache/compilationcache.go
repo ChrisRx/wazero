@@ -25,6 +25,13 @@ type Cache interface {
 	// which is applied when the binary is compiled from scratch without cache hit.
 	Get(key Key) (content io.ReadCloser, ok bool, err error)
 	//
+	// Has is called when the runtime wants to know whether Get would find the
+	// key, without reading the entry. A module whose compiled functions are
+	// cached was validated when they were compiled, so the runtime may skip
+	// validating its function bodies again (see RuntimeConfig.WithSkipValidationOnCacheHit).
+	// In the case of not-found, this should return ok=false with err=nil.
+	Has(key Key) (ok bool, err error)
+	//
 	// Add is called when the runtime is trying to add the new cache entry.
 	// The given `content` must be un-modified, and returned as-is in Get method.
 	//
