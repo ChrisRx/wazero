@@ -3,8 +3,8 @@ package backend
 import (
 	"testing"
 
-	"github.com/tetratelabs/wazero/internal/engine/wazevo/ssa"
-	"github.com/tetratelabs/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/engine/wazevo/ssa"
+	"github.com/ChrisRx/wazero/internal/testing/require"
 )
 
 func Test_goFunctionCallRequiredStackSize(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tetratelabs/wazero/internal/leb128"
+	"github.com/ChrisRx/wazero/internal/leb128"
 )
 
 type ConstantExpression struct {

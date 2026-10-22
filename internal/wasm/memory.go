@@ -11,10 +11,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental"
-	"github.com/tetratelabs/wazero/internal/internalapi"
-	"github.com/tetratelabs/wazero/internal/wasmruntime"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/experimental"
+	"github.com/ChrisRx/wazero/internal/internalapi"
+	"github.com/ChrisRx/wazero/internal/wasmruntime"
 )
 
 const (

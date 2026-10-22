@@ -1,7 +1,7 @@
 package binaryencoding
 
 import (
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 func encodeConstantExpression(expr wasm.ConstantExpression) (ret []byte) {

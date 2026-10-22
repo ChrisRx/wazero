@@ -3,7 +3,7 @@
 package sysfs
 
 import (
-	"github.com/tetratelabs/wazero/experimental/sys"
+	"github.com/ChrisRx/wazero/experimental/sys"
 )
 
 // poll implements `Poll` as documented on sys.File via a file descriptor.

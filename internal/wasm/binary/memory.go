@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/experimental"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 // decodeMemory returns the api.Memory decoded with the WebAssembly 1.0 (20191205) Binary Format.

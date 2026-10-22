@@ -9,10 +9,10 @@ import (
 	goruntime "runtime"
 	"testing"
 
-	"github.com/tetratelabs/wazero/internal/platform"
-	"github.com/tetratelabs/wazero/internal/testing/binaryencoding"
-	"github.com/tetratelabs/wazero/internal/testing/require"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/internal/platform"
+	"github.com/ChrisRx/wazero/internal/testing/binaryencoding"
+	"github.com/ChrisRx/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 //go:embed testdata/fac.wasm

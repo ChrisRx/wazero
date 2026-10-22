@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/tetratelabs/wazero/internal/leb128"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/internal/leb128"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 func ensureElementKindFuncRef(r *bytes.Reader) error {

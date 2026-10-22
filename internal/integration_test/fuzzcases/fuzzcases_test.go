@@ -8,13 +8,13 @@ import (
 	"math"
 	"testing"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/internal/platform"
-	"github.com/tetratelabs/wazero/internal/testing/binaryencoding"
-	"github.com/tetratelabs/wazero/internal/testing/nodiff"
-	"github.com/tetratelabs/wazero/internal/testing/require"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/internal/platform"
+	"github.com/ChrisRx/wazero/internal/testing/binaryencoding"
+	"github.com/ChrisRx/wazero/internal/testing/nodiff"
+	"github.com/ChrisRx/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 var ctx = context.Background()

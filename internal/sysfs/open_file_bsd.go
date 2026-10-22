@@ -5,7 +5,7 @@ package sysfs
 import (
 	"syscall"
 
-	"github.com/tetratelabs/wazero/experimental/sys"
+	"github.com/ChrisRx/wazero/experimental/sys"
 )
 
 const supportedSyscallOflag = sys.O_DIRECTORY | sys.O_NOFOLLOW | sys.O_NONBLOCK

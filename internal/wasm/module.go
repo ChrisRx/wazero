@@ -11,9 +11,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental"
-	"github.com/tetratelabs/wazero/internal/wasmdebug"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/experimental"
+	"github.com/ChrisRx/wazero/internal/wasmdebug"
 )
 
 // Module is a WebAssembly binary representation.

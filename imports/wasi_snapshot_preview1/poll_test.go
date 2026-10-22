@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	experimentalsys "github.com/tetratelabs/wazero/experimental/sys"
-	"github.com/tetratelabs/wazero/internal/sys"
-	"github.com/tetratelabs/wazero/internal/testing/require"
-	"github.com/tetratelabs/wazero/internal/wasip1"
-	"github.com/tetratelabs/wazero/internal/wasm"
-	sysapi "github.com/tetratelabs/wazero/sys"
+	"github.com/ChrisRx/wazero"
+	"github.com/ChrisRx/wazero/api"
+	experimentalsys "github.com/ChrisRx/wazero/experimental/sys"
+	"github.com/ChrisRx/wazero/internal/sys"
+	"github.com/ChrisRx/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/wasip1"
+	"github.com/ChrisRx/wazero/internal/wasm"
+	sysapi "github.com/ChrisRx/wazero/sys"
 )
 
 func Test_pollOneoff(t *testing.T) {

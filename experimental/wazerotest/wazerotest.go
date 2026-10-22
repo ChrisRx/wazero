@@ -11,9 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/internal/internalapi"
-	"github.com/tetratelabs/wazero/sys"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/internal/internalapi"
+	"github.com/ChrisRx/wazero/sys"
 )
 
 const (

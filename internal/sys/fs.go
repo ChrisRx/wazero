@@ -5,10 +5,10 @@ import (
 	"io/fs"
 	"net"
 
-	"github.com/tetratelabs/wazero/experimental/sys"
-	"github.com/tetratelabs/wazero/internal/descriptor"
-	socketapi "github.com/tetratelabs/wazero/internal/sock"
-	"github.com/tetratelabs/wazero/internal/sysfs"
+	"github.com/ChrisRx/wazero/experimental/sys"
+	"github.com/ChrisRx/wazero/internal/descriptor"
+	socketapi "github.com/ChrisRx/wazero/internal/sock"
+	"github.com/ChrisRx/wazero/internal/sysfs"
 )
 
 const (

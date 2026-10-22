@@ -1,8 +1,8 @@
 package binaryencoding
 
 import (
-	"github.com/tetratelabs/wazero/internal/leb128"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/internal/leb128"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 // encodeSection encodes the sectionID, the size of its contents in bytes, followed by the contents.

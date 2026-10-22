@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/internal/integration_test/spectest"
-	"github.com/tetratelabs/wazero/internal/platform"
+	"github.com/ChrisRx/wazero"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/internal/integration_test/spectest"
+	"github.com/ChrisRx/wazero/internal/platform"
 )
 
 const enabledFeatures = api.CoreFeaturesV2
