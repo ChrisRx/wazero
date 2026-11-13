@@ -47,6 +47,10 @@ type Compiler struct {
 	memoryBaseVariable, memoryLenVariable ssa.Variable
 	needMemory                            bool
 	memoryShared                          bool
+	// uncheckedMemory is set for a module compiled without memory bounds
+	// checks: its memory is backed by a reservation covering every address
+	// it can compute, which never moves (wasm.Module.UncheckedMemory).
+	uncheckedMemory bool
 	// memoryMinSizeInBytes is the static minimum size of the memory in bytes
 	// (zero if there is no memory). Since memories never shrink, any access
 	// whose end is a constant within this bound can never be out of bounds.
@@ -430,6 +434,7 @@ func (c *Compiler) declareWasmLocals() {
 func (c *Compiler) declareNecessaryVariables() {
 	if c.needMemory = c.m.MemorySection != nil; c.needMemory {
 		c.memoryShared = c.m.MemorySection.IsShared
+		c.uncheckedMemory = c.m.UncheckedMemory && !c.memoryShared
 		c.memoryMinSizeInBytes = uint64(c.m.MemorySection.Min) * uint64(wasm.MemoryPageSize)
 	} else if c.needMemory = c.m.ImportMemoryCount > 0; c.needMemory {
 		for _, imp := range c.m.ImportSection {

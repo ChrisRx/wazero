@@ -187,6 +187,7 @@ func NewRuntimeWithConfig(ctx context.Context, rConfig RuntimeConfig) Runtime {
 		dwarfDisabled:         config.dwarfDisabled,
 		storeCustomSections:   config.storeCustomSections,
 		ensureTermination:     config.ensureTermination,
+		compiler:              configKind == engineKindCompiler,
 	}
 }
 
@@ -209,6 +210,9 @@ type runtime struct {
 	closed atomic.Uint64
 
 	ensureTermination bool
+
+	// compiler is whether the engine is the compiler (wazevo).
+	compiler bool
 }
 
 // Module implements Runtime.Module.
@@ -258,6 +262,7 @@ func (r *runtime) CompileModule(ctx context.Context, binary []byte) (CompiledMod
 	if err != nil {
 		return nil, err
 	}
+	internal.UncheckedMemory = r.compiler && uncheckedMemory(ctx, internal)
 	internal.AssignModuleID(binary, listeners, r.ensureTermination)
 	if err = r.store.Engine.CompileModule(ctx, internal, listeners, r.ensureTermination); err != nil {
 		return nil, err
@@ -404,4 +409,18 @@ func (r *runtime) CloseWithExitCode(ctx context.Context, exitCode uint32) error 
 		}
 	}
 	return err
+}
+
+// uncheckedMemory reports whether module is compiled without memory bounds
+// checks (experimental.WithUncheckedMemoryAccess): only by the compiler, on
+// platforms that can reserve its whole address range, for a local memory
+// that isn't shared.
+func uncheckedMemory(ctx context.Context, module *wasm.Module) bool {
+	if on, _ := ctx.Value(expctxkeys.UncheckedMemoryKey{}).(bool); !on {
+		return false
+	}
+	if !platform.ReservedMemorySupported {
+		return false
+	}
+	return module.MemorySection != nil && !module.MemorySection.IsShared
 }

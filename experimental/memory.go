@@ -50,3 +50,24 @@ func WithMemoryAllocator(ctx context.Context, allocator MemoryAllocator) context
 	}
 	return ctx
 }
+
+// WithUncheckedMemoryAccess makes wazero.Runtime CompileModule, given the
+// returned context, compile without bounds checks on linear memory
+// accesses. Instances of the module back their memory with a fixed virtual
+// reservation (8 GiB plus a page) that covers every address a 32-bit access
+// can compute, so accesses stay inside it and the code can skip the checks.
+// Only touched pages use physical memory.
+//
+// This trades a guarantee of the WebAssembly spec for speed: an access past
+// the memory's current size doesn't trap. A read gets zeros or data written
+// there earlier, and a write lands in the reservation (it's zeroed before
+// the memory grows over it). It can't reach anything outside the
+// reservation, so the host stays memory-safe.
+//
+// It applies to the compiler on 64-bit Unix platforms, for modules that
+// define their own memory that isn't shared. Otherwise it has no effect.
+// The setting is part of the compiled module, including in the compilation
+// cache, and every instance of it gets the reservation.
+func WithUncheckedMemoryAccess(ctx context.Context) context.Context {
+	return context.WithValue(ctx, expctxkeys.UncheckedMemoryKey{}, true)
+}

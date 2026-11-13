@@ -4365,6 +4365,16 @@ func (c *Compiler) memOpSetup(baseAddr ssa.Value, constOffset, operationSizeInBy
 		}
 	}
 
+	if c.uncheckedMemory {
+		// Every address the access can compute is inside the reservation.
+		extBaseAddr := builder.AllocateInstruction().AsUExtend(baseAddr, 32, 64).Insert(builder).Return()
+		if address == ssa.ValueInvalid {
+			address = builder.AllocateInstruction().AsIadd(c.getMemoryBaseValue(false), extBaseAddr).Insert(builder).Return()
+		}
+		c.recordKnownSafeBound(baseAddrID, ceil, address)
+		return
+	}
+
 	ceilConst := builder.AllocateInstruction()
 	ceilConst.AsIconst64(ceil)
 	builder.InsertInstruction(ceilConst)
@@ -4491,6 +4501,12 @@ func (c *Compiler) reloadAfterCall() {
 }
 
 func (c *Compiler) reloadMemoryBaseLen() {
+	if c.uncheckedMemory {
+		// The reservation never moves, so only the length can change (it
+		// is still used by memory.size and the bulk memory instructions).
+		_ = c.getMemoryLenValue(true)
+		return
+	}
 	_ = c.getMemoryBaseValue(true)
 	_ = c.getMemoryLenValue(true)
 

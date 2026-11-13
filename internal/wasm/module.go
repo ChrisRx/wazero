@@ -183,6 +183,12 @@ type Module struct {
 	// IsHostModule true if this is the host module, false otherwise.
 	IsHostModule bool
 
+	// UncheckedMemory is set when the module was compiled without memory
+	// bounds checks (experimental.WithUncheckedMemoryAccess): its memory is
+	// local and not shared, and instantiation backs it with a reservation
+	// covering every address the module can compute.
+	UncheckedMemory bool
+
 	// functionDefinitionSectionInitOnce guards FunctionDefinitionSection so that it is initialized exactly once.
 	functionDefinitionSectionInitOnce sync.Once
 
@@ -224,6 +230,9 @@ func (m *Module) AssignModuleID(wasm []byte, listeners []experimental.FunctionLi
 	}
 	// Write the flag of ensureTermination to the checksum.
 	m.ID[0] = boolToByte(withEnsureTermination)
+	h.Write(m.ID[:1])
+	// Code compiled for UncheckedMemory differs, as does its memory.
+	m.ID[0] = boolToByte(m.UncheckedMemory)
 	h.Write(m.ID[:1])
 	// Get checksum by passing the slice underlying m.ID.
 	h.Sum(m.ID[:0])
@@ -778,7 +787,19 @@ func paramNames(localNames IndirectNameMap, funcIdx uint32, paramLen int) []stri
 func (m *ModuleInstance) buildMemory(module *Module, allocator experimental.MemoryAllocator) {
 	memSec := module.MemorySection
 	if memSec != nil {
+		var reserved *reservedMemory
+		if module.UncheckedMemory {
+			// The compiled code relies on the reservation, so it can't be
+			// replaced by another allocator.
+			reserved = newReservedMemory()
+			allocator = experimental.MemoryAllocatorFunc(func(uint64, uint64) experimental.LinearMemory {
+				return reserved
+			})
+		}
 		m.MemoryInstance = NewMemoryInstance(memSec, allocator, m.Engine)
+		if reserved != nil {
+			reserved.unmapWhenUnreachable(m.MemoryInstance)
+		}
 		m.MemoryInstance.definition = &module.MemoryDefinitionSection[0]
 	}
 }
