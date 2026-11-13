@@ -20,6 +20,7 @@ func init() {
 		}
 
 		PerfMap = &Perfmap{fh: fh}
+		initJitdump()
 	}
 }
 
@@ -65,6 +66,9 @@ func (f *Perfmap) Flush(addr uintptr, functionOffsets []int) {
 	defer func() {
 		_ = f.fh.Sync()
 	}()
+	if jitDump != nil {
+		jitDump.flush(addr, functionOffsets, f.entries)
+	}
 
 	for _, e := range f.entries {
 		if _, err := f.fh.WriteString(fmt.Sprintf("%x %s %s\n",
@@ -85,6 +89,9 @@ func (f *Perfmap) Clear() {
 
 // AddEntry writes a perfmap entry directly into the perfmap file, not using the entries.
 func (f *Perfmap) AddEntry(addr uintptr, size uint64, name string) {
+	if jitDump != nil {
+		jitDump.codeLoad(addr, size, name)
+	}
 	_, err := f.fh.WriteString(fmt.Sprintf("%x %s %s\n",
 		addr,
 		strconv.FormatUint(size, 16),
