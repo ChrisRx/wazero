@@ -5,8 +5,8 @@ import (
 	_ "embed"
 	"testing"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/internal/platform"
+	"github.com/ChrisRx/wazero"
+	"github.com/ChrisRx/wazero/internal/platform"
 )
 
 //go:embed testdata/i32_upper_bits.wasm

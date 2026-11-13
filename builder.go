@@ -3,8 +3,8 @@ package wazero
 import (
 	"context"
 
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 // HostFunctionBuilder defines a host function (in Go), so that a

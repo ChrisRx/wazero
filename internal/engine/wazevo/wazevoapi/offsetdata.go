@@ -1,7 +1,7 @@
 package wazevoapi
 
 import (
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 const (

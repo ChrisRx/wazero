@@ -9,11 +9,11 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"github.com/tetratelabs/wazero/internal/filecache"
-	"github.com/tetratelabs/wazero/internal/testing/require"
-	"github.com/tetratelabs/wazero/internal/u32"
-	"github.com/tetratelabs/wazero/internal/u64"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/internal/filecache"
+	"github.com/ChrisRx/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/u32"
+	"github.com/ChrisRx/wazero/internal/u64"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 var testVersion = "0.0.1"

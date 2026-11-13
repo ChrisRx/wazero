@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/tetratelabs/wazero/internal/wasmdebug"
+	"github.com/ChrisRx/wazero/internal/wasmdebug"
 )
 
 func stackView(rbp, top uintptr) []byte {

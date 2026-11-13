@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental/table"
-	"github.com/tetratelabs/wazero/internal/testing/binaryencoding"
-	"github.com/tetratelabs/wazero/internal/testing/require"
-	"github.com/tetratelabs/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/experimental/table"
+	"github.com/ChrisRx/wazero/internal/testing/binaryencoding"
+	"github.com/ChrisRx/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/wasm"
 )
 
 func TestLookupFunction(t *testing.T) {

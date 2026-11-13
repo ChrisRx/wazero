@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tetratelabs/wazero/experimental/sys"
-	"github.com/tetratelabs/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/experimental/sys"
+	"github.com/ChrisRx/wazero/internal/testing/require"
 )
 
 func Test_poll(t *testing.T) {

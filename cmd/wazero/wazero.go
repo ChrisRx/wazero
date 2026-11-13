@@ -15,16 +15,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental"
-	"github.com/tetratelabs/wazero/experimental/logging"
-	"github.com/tetratelabs/wazero/experimental/sock"
-	"github.com/tetratelabs/wazero/experimental/sysfs"
-	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
-	internalsys "github.com/tetratelabs/wazero/internal/sys"
-	"github.com/tetratelabs/wazero/internal/version"
-	"github.com/tetratelabs/wazero/sys"
+	"github.com/ChrisRx/wazero"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/experimental"
+	"github.com/ChrisRx/wazero/experimental/logging"
+	"github.com/ChrisRx/wazero/experimental/sock"
+	"github.com/ChrisRx/wazero/experimental/sysfs"
+	"github.com/ChrisRx/wazero/imports/wasi_snapshot_preview1"
+	internalsys "github.com/ChrisRx/wazero/internal/sys"
+	"github.com/ChrisRx/wazero/internal/version"
+	"github.com/ChrisRx/wazero/sys"
 )
 
 func main() {

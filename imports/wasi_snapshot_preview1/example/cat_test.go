@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tetratelabs/wazero/internal/testing/maintester"
-	"github.com/tetratelabs/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/testing/maintester"
+	"github.com/ChrisRx/wazero/internal/testing/require"
 )
 
 // Test_main ensures the following will work:
@@ -30,7 +30,7 @@ func Test_main(t *testing.T) {
 
 // Test_cli ensures the following will work:
 //
-// go run github.com/tetratelabs/wazero/cmd/wazero run -mount=testdata:/ cat.wasm /test.txt
+// go run github.com/ChrisRx/wazero/cmd/wazero run -mount=testdata:/ cat.wasm /test.txt
 func Test_cli(t *testing.T) {
 	tests := []struct {
 		toolchain string

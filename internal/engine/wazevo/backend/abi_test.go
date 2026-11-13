@@ -3,9 +3,9 @@ package backend
 import (
 	"testing"
 
-	"github.com/tetratelabs/wazero/internal/engine/wazevo/backend/regalloc"
-	"github.com/tetratelabs/wazero/internal/engine/wazevo/ssa"
-	"github.com/tetratelabs/wazero/internal/testing/require"
+	"github.com/ChrisRx/wazero/internal/engine/wazevo/backend/regalloc"
+	"github.com/ChrisRx/wazero/internal/engine/wazevo/ssa"
+	"github.com/ChrisRx/wazero/internal/testing/require"
 )
 
 const (

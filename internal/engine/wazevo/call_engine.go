@@ -8,14 +8,14 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental"
-	"github.com/tetratelabs/wazero/internal/engine/wazevo/wazevoapi"
-	"github.com/tetratelabs/wazero/internal/expctxkeys"
-	"github.com/tetratelabs/wazero/internal/internalapi"
-	"github.com/tetratelabs/wazero/internal/wasm"
-	"github.com/tetratelabs/wazero/internal/wasmdebug"
-	"github.com/tetratelabs/wazero/internal/wasmruntime"
+	"github.com/ChrisRx/wazero/api"
+	"github.com/ChrisRx/wazero/experimental"
+	"github.com/ChrisRx/wazero/internal/engine/wazevo/wazevoapi"
+	"github.com/ChrisRx/wazero/internal/expctxkeys"
+	"github.com/ChrisRx/wazero/internal/internalapi"
+	"github.com/ChrisRx/wazero/internal/wasm"
+	"github.com/ChrisRx/wazero/internal/wasmdebug"
+	"github.com/ChrisRx/wazero/internal/wasmruntime"
 )
 
 type (

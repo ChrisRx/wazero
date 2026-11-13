@@ -5,7 +5,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/tetratelabs/wazero/api"
+	"github.com/ChrisRx/wazero/api"
 )
 
 // Table describes the limits of elements and its type in a table.
