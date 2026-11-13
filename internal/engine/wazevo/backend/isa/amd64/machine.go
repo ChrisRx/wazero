@@ -194,12 +194,11 @@ type trapIsland struct {
 	l    label
 }
 
-// trapIslandCtxOffsetFromRSP is where a conditional-trap site stores the
-// execution context pointer for the island to reload: the word just below
-// the stack pointer (disp32 -16), which holds no live data and cannot be
-// overwritten between the site and the island (no call or push intervenes,
-// and signal handlers run on their own stack).
-const trapIslandCtxOffsetFromRSP uint32 = 0xffff_fff0
+// trapIslandCtxOffsetFromRBP is where the prologue saves the execution
+// context pointer for the function's trap islands to reload: the first word
+// below RBP (disp32 -8). Saving it once per frame keeps the trap sites, such
+// as memory bounds checks, to a compare and a branch.
+const trapIslandCtxOffsetFromRBP uint32 = 0xffff_fff8
 
 // getOrCreateTrapIsland returns the label of this function's shared trap
 // island for the given exit code, allocating it on first use. The island
@@ -1662,14 +1661,9 @@ func (m *machine) lowerExitIfTrueWithCodeShared(execCtx regalloc.VReg, cond ssa.
 
 	// The island runs after register allocation and needs the execution
 	// context in a known location; unlike arm64 there is no reserved scratch
-	// register, so it is handed over through the word just below the stack
-	// pointer (see trapIslandCtxOffsetFromRSP).
-	store := m.allocateInstr().asMovRM(
-		execCtx,
-		newOperandMem(m.newAmodeImmReg(trapIslandCtxOffsetFromRSP, rspVReg)),
-		8,
-	)
-	m.insert(store)
+	// register, so the prologue saves it in the frame once (see
+	// trapIslandCtxOffsetFromRBP) instead of every trap site storing it.
+	_ = execCtx
 
 	x, y, c := cvalInstr.IcmpData()
 	xx, yy := m.c.ValueDefinition(x), m.c.ValueDefinition(y)
@@ -2448,6 +2442,7 @@ func (m *machine) copyToTmp(v regalloc.VReg) regalloc.VReg {
 
 func (m *machine) requiredStackSize() int64 {
 	return m.maxRequiredStackSizeForCalls +
+		m.trapIslandCtxSlotSize() +
 		m.frameSize() +
 		16 + // Need for stack checking.
 		16 // return address and the caller RBP.
@@ -2459,6 +2454,15 @@ func (m *machine) frameSize() int64 {
 		panic(fmt.Errorf("BUG: frame size %d is not 16-byte aligned", s))
 	}
 	return s
+}
+
+// trapIslandCtxSlotSize is the size of the frame slot holding the execution
+// context for the function's trap islands, if it has any.
+func (m *machine) trapIslandCtxSlotSize() int64 {
+	if len(m.trapIslands) == 0 {
+		return 0
+	}
+	return 16 // Keeps the stack 16-byte aligned.
 }
 
 func (m *machine) clobberedRegSlotSize() int64 {

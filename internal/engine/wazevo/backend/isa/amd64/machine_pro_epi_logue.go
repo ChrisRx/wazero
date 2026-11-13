@@ -42,7 +42,7 @@ func (m *machine) emitTrapIslands() {
 
 		// Reload the execution context stored by the trap site.
 		reload := m.allocateInstr().asMov64MR(
-			newOperandMem(m.newAmodeImmReg(trapIslandCtxOffsetFromRSP, rspVReg)),
+			newOperandMem(m.newAmodeImmReg(trapIslandCtxOffsetFromRBP, rbpVReg)),
 			raxVReg,
 		)
 		cur = linkInstr(cur, reload)
@@ -114,6 +114,14 @@ func (m *machine) setupPrologue() {
 
 	if !m.stackBoundsCheckDisabled {
 		cur = m.insertStackBoundsCheck(m.requiredStackSize(), cur)
+	}
+
+	// Save the execution context (RAX on entry) for the trap islands, in
+	// the 16 bytes below RBP. The epilogue frees it when it moves RBP back
+	// into RSP.
+	if m.trapIslandCtxSlotSize() > 0 {
+		cur = linkInstr(cur, m.allocateInstr().asPush64(newOperandReg(raxVReg)))
+		cur = linkInstr(cur, m.allocateInstr().asPush64(newOperandReg(raxVReg)))
 	}
 
 	//
