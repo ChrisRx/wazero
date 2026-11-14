@@ -6,7 +6,9 @@ import (
 
 	"github.com/ChrisRx/wazero/api"
 	"github.com/ChrisRx/wazero/experimental/sys"
+	socketapi "github.com/ChrisRx/wazero/internal/sock"
 	internalsys "github.com/ChrisRx/wazero/internal/sys"
+	"github.com/ChrisRx/wazero/internal/sysfs"
 	"github.com/ChrisRx/wazero/internal/wasip1"
 	"github.com/ChrisRx/wazero/internal/wasm"
 )
@@ -83,11 +85,11 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 
 	// Extract FS context, used in the body of the for loop for FS access.
 	fsc := mod.(*wasm.ModuleInstance).Sys.FS()
-	// blockingPollSubs are fd read subscriptions processed after the loop via polling.
-	var blockingPollSubs []struct {
-		evt  *event
-		file sys.File
-	}
+	// blockingPollSubs are fd subscriptions processed after the loop via polling.
+	var blockingPollSubs []pollSub
+	// readyFds counts fd subscriptions already acked in the loop, which
+	// means the blocking ones are only checked, not waited for.
+	readyFds := 0
 	// The timeout is initialized at max Duration, the loop will find the minimum.
 	const noTimeout = time.Duration(1<<63 - 1)
 	timeout := noTimeout
@@ -135,28 +137,32 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 				evt.errno = wasip1.ErrnoBadf
 				writeEvent(outBuf[outOffset:], evt)
 				nevents++
-			} else if fd != internalsys.FdStdin && isNonblock(file.File) {
+				readyFds++
+			} else if fd != internalsys.FdStdin && isNonblock(file.File) && !isSocket(file.File) {
 				writeEvent(outBuf[outOffset:], evt)
 				nevents++
+				readyFds++
 			} else {
-				// The fd is in blocking mode; do not ack yet, append
-				// to a slice for deferred polling evaluation.
-				blockingPollSubs = append(blockingPollSubs, struct {
-					evt  *event
-					file sys.File
-				}{evt, file.File})
+				// The fd is in blocking mode, or a socket whose readiness
+				// is known; do not ack yet, append to a slice for deferred
+				// polling evaluation.
+				blockingPollSubs = append(blockingPollSubs, pollSub{evt, file.File, sys.POLLIN})
 			}
 		case wasip1.EventTypeFdWrite:
 			fd := int32(le.Uint32(argBuf))
 			if fd < 0 {
 				return sys.EBADF
 			}
-			if _, ok := fsc.LookupFile(fd); ok {
+			if file, ok := fsc.LookupFile(fd); ok && isSocket(file.File) {
+				blockingPollSubs = append(blockingPollSubs, pollSub{evt, file.File, sys.POLLOUT})
+				continue
+			} else if ok {
 				evt.errno = wasip1.ErrnoNotsup
 			} else {
 				evt.errno = wasip1.ErrnoBadf
 			}
 			nevents++
+			readyFds++
 			writeEvent(outBuf[outOffset:], evt)
 		default:
 			return sys.EINVAL
@@ -175,6 +181,18 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 		return 0
 	}
 
+	if readyFds > 0 {
+		timeout = 0
+	}
+
+	// When every blocking subscriber has a host file descriptor, wait for
+	// all of them at once.
+	if done, errno := pollHost(blockingPollSubs, timeout, outBuf, &nevents); errno != 0 {
+		return errno
+	} else if done {
+		blockingPollSubs = nil
+	}
+
 	// Wait for the timeout to expire, or for data to become available on
 	// each blocking fd subscriber. The remaining time budget is tracked
 	// across iterations so total wall time never exceeds the timeout.
@@ -188,7 +206,10 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 			continue
 		}
 		start := time.Now()
-		ready, errno := p.Poll(sys.POLLIN, int32(remaining.Milliseconds()))
+		if remaining == noTimeout {
+			remaining = -1
+		}
+		ready, errno := p.Poll(sub.flag, sysfs.TimeoutMillis(remaining))
 		switch errno {
 		case 0:
 			if ready {
@@ -202,6 +223,9 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 			nevents++
 		default:
 			return errno
+		}
+		if remaining < 0 {
+			continue
 		}
 		if elapsed := time.Since(start); elapsed < remaining {
 			remaining -= elapsed
@@ -217,6 +241,52 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 	}
 
 	return 0
+}
+
+// pollSub is an fd subscription that is waited for.
+type pollSub struct {
+	evt  *event
+	file sys.File
+	flag sys.Pflag
+}
+
+// pollHost waits for subs together, and acks the ready ones, when all have a
+// host file descriptor. Otherwise it returns false and leaves them be.
+func pollHost(subs []pollSub, timeout time.Duration, outBuf []byte, nevents *uint32) (bool, sys.Errno) {
+	if !sysfs.PollHostSupported || len(subs) == 0 {
+		return false, 0
+	}
+	reqs := make([]sysfs.PollRequest, len(subs))
+	for i, sub := range subs {
+		fd, ok := sysfs.HostFd(sub.file)
+		if !ok {
+			return false, 0
+		}
+		reqs[i] = sysfs.PollRequest{Fd: fd, Flag: sub.flag}
+	}
+	if timeout == time.Duration(1<<63-1) {
+		timeout = -1
+	}
+	if errno := sysfs.PollHost(reqs, sysfs.TimeoutMillis(timeout)); errno != 0 {
+		return false, errno
+	}
+	for i, sub := range subs {
+		if reqs[i].Ready {
+			writeEvent(outBuf[*nevents*32:], sub.evt)
+			*nevents++
+		}
+	}
+	return true, 0
+}
+
+// isSocket reports whether f is a TCP socket, whose readiness is polled
+// even in non-blocking mode.
+func isSocket(f sys.File) bool {
+	switch f.(type) {
+	case socketapi.TCPSock, socketapi.TCPConn:
+		return true
+	}
+	return false
 }
 
 // processClockEvent supports only relative name events, as that's what's used

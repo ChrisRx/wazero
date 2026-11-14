@@ -3,6 +3,7 @@ package sysfs
 import (
 	"net"
 	"os"
+	"syscall"
 
 	experimentalsys "github.com/ChrisRx/wazero/experimental/sys"
 	socketapi "github.com/ChrisRx/wazero/internal/sock"
@@ -59,10 +60,11 @@ func newDefaultTCPListenerFile(tl *net.TCPListener) socketapi.TCPSock {
 
 // Close implements the same method as documented on experimentalsys.File
 func (f *tcpListenerFile) Close() experimentalsys.Errno {
-	if !f.closed {
-		return experimentalsys.UnwrapOSError(f.tl.Close())
+	if f.closed {
+		return 0
 	}
-	return 0
+	f.closed = true
+	return experimentalsys.UnwrapOSError(f.tl.Close())
 }
 
 // Addr is exposed for testing.
@@ -77,7 +79,11 @@ func (f *tcpListenerFile) IsNonblock() bool {
 
 // Poll implements the same method as documented on experimentalsys.Pollable
 func (f *tcpListenerFile) Poll(flag experimentalsys.Pflag, timeoutMillis int32) (ready bool, errno experimentalsys.Errno) {
-	return false, experimentalsys.ENOSYS
+	return _pollSock(f.tl, flag, timeoutMillis)
+}
+
+func (f *tcpListenerFile) hostFd() (uintptr, bool) {
+	return connFd(f.tl, f.closed)
 }
 
 var _ socketapi.TCPConn = (*tcpConnFile)(nil)
@@ -92,6 +98,11 @@ type tcpConnFile struct {
 	nonblock bool
 	// closed is true when closed was called. This ensures proper experimentalsys.EBADF
 	closed bool
+}
+
+// NewTCPConnFile creates a socketapi.TCPConn for a given *net.TCPConn.
+func NewTCPConnFile(tc *net.TCPConn) socketapi.TCPConn {
+	return newTcpConn(tc)
 }
 
 func newTcpConn(tc *net.TCPConn) socketapi.TCPConn {
@@ -163,7 +174,7 @@ func (f *tcpConnFile) close() experimentalsys.Errno {
 		return 0
 	}
 	f.closed = true
-	return f.Shutdown(socketapi.SHUT_RDWR)
+	return experimentalsys.UnwrapOSError(f.tc.Close())
 }
 
 // SetNonblock implements the same method as documented on experimentalsys.PollableFile
@@ -182,5 +193,33 @@ func (f *tcpConnFile) IsNonblock() bool {
 
 // Poll implements the same method as documented on experimentalsys.Pollable
 func (f *tcpConnFile) Poll(flag experimentalsys.Pflag, timeoutMillis int32) (ready bool, errno experimentalsys.Errno) {
-	return false, experimentalsys.ENOSYS
+	return _pollSock(f.tc, flag, timeoutMillis)
+}
+
+func (f *tcpConnFile) hostFd() (uintptr, bool) {
+	return connFd(f.tc, f.closed)
+}
+
+// connFd returns the host file descriptor of conn, unless closed.
+func connFd(conn syscall.Conn, closed bool) (fd uintptr, ok bool) {
+	if closed {
+		return 0, false
+	}
+	_, errno := syscallConnControl(conn, func(f uintptr) (int, experimentalsys.Errno) {
+		fd = f
+		return 0, 0
+	})
+	return fd, errno == 0
+}
+
+// SockConn returns the *net.TCPListener or *net.TCPConn behind a TCP socket
+// file.
+func SockConn(f experimentalsys.File) (any, bool) {
+	switch f := f.(type) {
+	case *tcpListenerFile:
+		return f.tl, true
+	case *tcpConnFile:
+		return f.tc, true
+	}
+	return nil, false
 }

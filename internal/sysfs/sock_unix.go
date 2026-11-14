@@ -17,15 +17,14 @@ func newTCPListenerFile(tl *net.TCPListener) socketapi.TCPSock {
 	return newDefaultTCPListenerFile(tl)
 }
 
-func _pollSock(conn syscall.Conn, flag sys.Pflag, timeoutMillis int32) (bool, sys.Errno) {
-	n, errno := syscallConnControl(conn, func(fd uintptr) (int, sys.Errno) {
-		if ready, errno := poll(fd, sys.POLLIN, 0); !ready || errno != 0 {
-			return -1, errno
-		} else {
-			return 0, errno
-		}
+func _pollSock(conn syscall.Conn, flag sys.Pflag, timeoutMillis int32) (ready bool, errno sys.Errno) {
+	_, errno = syscallConnControl(conn, func(fd uintptr) (int, sys.Errno) {
+		reqs := []PollRequest{{Fd: fd, Flag: flag}}
+		errno := PollHost(reqs, timeoutMillis)
+		ready = reqs[0].Ready
+		return 0, errno
 	})
-	return n >= 0, errno
+	return
 }
 
 func setNonblockSocket(fd uintptr, enabled bool) sys.Errno {

@@ -229,6 +229,11 @@ func (f *osFile) Seek(offset int64, whence int) (newOffset int64, errno experime
 }
 
 // Poll implements the same method as documented on experimentalsys.Pollable
+func (f *osFile) hostFd() (uintptr, bool) {
+	return f.fd, !f.closed
+}
+
+// Poll implements the same method as documented on experimentalsys.Pollable
 func (f *osFile) Poll(flag experimentalsys.Pflag, timeoutMillis int32) (ready bool, errno experimentalsys.Errno) {
 	return poll(f.fd, flag, timeoutMillis)
 }

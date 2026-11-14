@@ -93,6 +93,10 @@ func (f *stdioFile) Poll(flag experimentalsys.Pflag, timeoutMillis int32) (ready
 	return false, experimentalsys.ENOSYS
 }
 
+func (f *stdioFile) hostFd() (uintptr, bool) {
+	return HostFd(f.File)
+}
+
 // SetAppend implements File.SetAppend
 func (f *stdioFile) SetAppend(bool) experimentalsys.Errno {
 	// Ignore for stdio.

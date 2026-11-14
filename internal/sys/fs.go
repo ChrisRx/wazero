@@ -324,8 +324,8 @@ func (c *FSContext) Renumber(from, to int32) sys.Errno {
 // descriptor.
 func (c *FSContext) SockAccept(sockFD int32, nonblock bool) (int32, sys.Errno) {
 	var sock socketapi.TCPSock
-	if e, ok := c.LookupFile(sockFD); !ok || !e.IsPreopen {
-		return 0, sys.EBADF // Not a preopen
+	if e, ok := c.LookupFile(sockFD); !ok {
+		return 0, sys.EBADF // Not open
 	} else if sock, ok = e.File.(socketapi.TCPSock); !ok {
 		return 0, sys.EBADF // Not a sock
 	}
@@ -351,6 +351,26 @@ func (c *FSContext) SockAccept(sockFD int32, nonblock bool) (int32, sys.Errno) {
 	} else {
 		return newFD, 0
 	}
+}
+
+// InsertFile adds f to the table and returns its file descriptor.
+func (c *FSContext) InsertFile(f sys.File) (int32, sys.Errno) {
+	if fd, ok := c.openedFiles.Insert(&FileEntry{File: f}); ok {
+		return fd, 0
+	}
+	return 0, sys.EBADF
+}
+
+// ReplaceFile makes fd refer to f instead, without closing the file it
+// referred to. Preopens can't be replaced.
+func (c *FSContext) ReplaceFile(fd int32, f sys.File) sys.Errno {
+	e, ok := c.openedFiles.Lookup(fd)
+	if !ok || e.IsPreopen {
+		return sys.EBADF
+	}
+	e.File = f
+	e.direntCache = nil
+	return 0
 }
 
 // CloseFile returns any error closing the existing file.

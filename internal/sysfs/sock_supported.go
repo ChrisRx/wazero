@@ -48,7 +48,9 @@ func (f *tcpConnFile) Shutdown(how int) experimentalsys.Errno {
 	case socketapi.SHUT_WR:
 		err = f.tc.CloseWrite()
 	case socketapi.SHUT_RDWR:
-		return f.close()
+		if err = f.tc.CloseRead(); err == nil {
+			err = f.tc.CloseWrite()
+		}
 	default:
 		return experimentalsys.EINVAL
 	}
