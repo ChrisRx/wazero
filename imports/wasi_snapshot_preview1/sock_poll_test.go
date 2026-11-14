@@ -1,6 +1,7 @@
 package wasi_snapshot_preview1_test
 
 import (
+	"context"
 	"encoding/binary"
 	"io"
 	"net"
@@ -173,4 +174,47 @@ func Test_sockOpenAttach(t *testing.T) {
 	requireErrnoResult(t, wasip1.ErrnoSuccess, mod, wasip1.FdCloseName, uint64(fd))
 	_, err = net.DialTimeout("tcp", ln.Addr().String(), time.Second)
 	require.Error(t, err)
+}
+
+// Blocking calls exit the module when their context is done, without
+// RuntimeConfig.WithCloseOnContextDone.
+func Test_blockingCallsStopOnContextDone(t *testing.T) {
+	sub := func(eventType byte, fd uint32, timeout time.Duration) []byte {
+		b := make([]byte, 48)
+		b[8] = eventType
+		if eventType == wasip1.EventTypeClock {
+			binary.LittleEndian.PutUint64(b[24:], uint64(timeout))
+		} else {
+			binary.LittleEndian.PutUint32(b[16:], fd)
+		}
+		return b
+	}
+	listener := uint32(sys.FdPreopen)
+	for _, tc := range []struct {
+		name   string
+		fn     string
+		params []uint64
+		subs   []byte
+	}{
+		{name: "sock_accept", fn: wasip1.SockAcceptName, params: []uint64{uint64(listener), 0, 128}},
+		{name: "poll_oneoff socket", fn: wasip1.PollOneoffName, params: []uint64{0, 1024, 1, 2048},
+			subs: sub(wasip1.EventTypeFdRead, listener, 0)},
+		{name: "poll_oneoff sleep", fn: wasip1.PollOneoffName, params: []uint64{0, 1024, 1, 2048},
+			subs: sub(wasip1.EventTypeClock, 0, time.Hour)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := experimentalsock.WithConfig(testCtx, experimentalsock.NewConfig().WithTCPListener("127.0.0.1", 0))
+			mod, r, _ := requireProxyModuleWithContext(ctx, t, wazero.NewModuleConfig().WithSysNanosleep())
+			defer r.Close(testCtx)
+			if tc.subs != nil {
+				require.True(t, mod.Memory().Write(0, tc.subs))
+			}
+			ctx, cancel := context.WithCancel(testCtx)
+			time.AfterFunc(100*time.Millisecond, cancel)
+			start := time.Now()
+			_, err := mod.ExportedFunction(tc.fn).Call(ctx, tc.params...)
+			require.True(t, time.Since(start) < 5*time.Second, "returned after %v", time.Since(start))
+			require.ErrorIs(t, err, context.Canceled)
+		})
+	}
 }

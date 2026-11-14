@@ -50,7 +50,7 @@ type event struct {
 	errno     wasip1.Errno
 }
 
-func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno {
+func pollOneoffFn(ctx context.Context, mod api.Module, params []uint64) sys.Errno {
 	in := uint32(params[0])
 	out := uint32(params[1])
 	nsubscriptions := uint32(params[2])
@@ -176,7 +176,7 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 		// We only need to observe the timeout (lowered only by clock subscriptions)
 		// and return.
 		if timeout != noTimeout && timeout > 0 {
-			sysCtx.Nanosleep(int64(timeout))
+			sleepContext(ctx, mod, sysCtx.Nanosleep, timeout)
 		}
 		return 0
 	}
@@ -187,7 +187,7 @@ func pollOneoffFn(_ context.Context, mod api.Module, params []uint64) sys.Errno 
 
 	// When every blocking subscriber has a host file descriptor, wait for
 	// all of them at once.
-	if done, errno := pollHost(blockingPollSubs, timeout, outBuf, &nevents); errno != 0 {
+	if done, errno := pollHost(ctx, mod, blockingPollSubs, timeout, outBuf, &nevents); errno != 0 {
 		return errno
 	} else if done {
 		blockingPollSubs = nil
@@ -252,7 +252,7 @@ type pollSub struct {
 
 // pollHost waits for subs together, and acks the ready ones, when all have a
 // host file descriptor. Otherwise it returns false and leaves them be.
-func pollHost(subs []pollSub, timeout time.Duration, outBuf []byte, nevents *uint32) (bool, sys.Errno) {
+func pollHost(ctx context.Context, mod api.Module, subs []pollSub, timeout time.Duration, outBuf []byte, nevents *uint32) (bool, sys.Errno) {
 	if !sysfs.PollHostSupported || len(subs) == 0 {
 		return false, 0
 	}
@@ -267,7 +267,7 @@ func pollHost(subs []pollSub, timeout time.Duration, outBuf []byte, nevents *uin
 	if timeout == time.Duration(1<<63-1) {
 		timeout = -1
 	}
-	if errno := sysfs.PollHost(reqs, sysfs.TimeoutMillis(timeout)); errno != 0 {
+	if errno := pollHostContext(ctx, mod, reqs, sysfs.TimeoutMillis(timeout)); errno != 0 {
 		return false, errno
 	}
 	for i, sub := range subs {

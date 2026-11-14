@@ -23,11 +23,14 @@ var sockAccept = newHostFunc(
 	"fd", "flags", "result.fd",
 )
 
-func sockAcceptFn(_ context.Context, mod api.Module, params []uint64) (errno sys.Errno) {
+func sockAcceptFn(ctx context.Context, mod api.Module, params []uint64) (errno sys.Errno) {
 	mem := mod.Memory()
 	fsc := mod.(*wasm.ModuleInstance).Sys.FS()
 
 	fd := int32(params[0])
+	if e, ok := fsc.LookupFile(fd); ok {
+		waitSocket(ctx, mod, e.File, sys.POLLIN)
+	}
 	flags := uint32(params[1])
 	resultFd := uint32(params[2])
 	nonblock := flags&uint32(wasip1.FD_NONBLOCK) != 0
@@ -50,7 +53,7 @@ var sockRecv = newHostFunc(
 	"fd", "ri_data", "ri_data_len", "ri_flags", "result.ro_datalen", "result.ro_flags",
 )
 
-func sockRecvFn(_ context.Context, mod api.Module, params []uint64) sys.Errno {
+func sockRecvFn(ctx context.Context, mod api.Module, params []uint64) sys.Errno {
 	mem := mod.Memory()
 	fsc := mod.(*wasm.ModuleInstance).Sys.FS()
 
@@ -71,6 +74,7 @@ func sockRecvFn(_ context.Context, mod api.Module, params []uint64) sys.Errno {
 	if riFlags & ^(wasip1.RI_RECV_PEEK|wasip1.RI_RECV_WAITALL) != 0 {
 		return sys.ENOTSUP
 	}
+	waitSocket(ctx, mod, conn, sys.POLLIN)
 
 	if riFlags&wasip1.RI_RECV_PEEK != 0 {
 		// Each record in riData is of the form:
@@ -122,7 +126,7 @@ var sockSend = newHostFunc(
 	"fd", "si_data", "si_data_len", "si_flags", "result.so_datalen",
 )
 
-func sockSendFn(_ context.Context, mod api.Module, params []uint64) sys.Errno {
+func sockSendFn(ctx context.Context, mod api.Module, params []uint64) sys.Errno {
 	mem := mod.Memory()
 	fsc := mod.(*wasm.ModuleInstance).Sys.FS()
 
@@ -143,6 +147,7 @@ func sockSendFn(_ context.Context, mod api.Module, params []uint64) sys.Errno {
 		return sys.EBADF // Not a conn
 	}
 
+	waitSocket(ctx, mod, conn, sys.POLLOUT)
 	bufSize, errno := writev(mem, siData, siDataCount, conn.Write)
 	if errno != 0 {
 		return errno
