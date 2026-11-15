@@ -174,8 +174,8 @@ func pollOneoffFn(ctx context.Context, mod api.Module, params []uint64) sys.Errn
 		// We already wrote back all the results. We already wrote this number
 		// earlier to offset `resultNevents`.
 		// We only need to observe the timeout (lowered only by clock subscriptions)
-		// and return.
-		if timeout != noTimeout && timeout > 0 {
+		// and return, unless an fd event is already there.
+		if readyFds == 0 && timeout != noTimeout && timeout > 0 {
 			sleepContext(ctx, mod, sysCtx.Nanosleep, timeout)
 		}
 		return 0

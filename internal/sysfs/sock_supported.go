@@ -41,15 +41,19 @@ func (f *tcpListenerFile) SetNonblock(enabled bool) (errno experimentalsys.Errno
 // Shutdown implements the same method as documented on experimentalsys.Conn
 func (f *tcpConnFile) Shutdown(how int) experimentalsys.Errno {
 	// FIXME: can userland shutdown listeners?
+	tc, ok := f.tc.(*net.TCPConn)
+	if !ok {
+		return experimentalsys.ENOTSUP // UDP
+	}
 	var err error
 	switch how {
 	case socketapi.SHUT_RD:
-		err = f.tc.CloseRead()
+		err = tc.CloseRead()
 	case socketapi.SHUT_WR:
-		err = f.tc.CloseWrite()
+		err = tc.CloseWrite()
 	case socketapi.SHUT_RDWR:
-		if err = f.tc.CloseRead(); err == nil {
-			err = f.tc.CloseWrite()
+		if err = tc.CloseRead(); err == nil {
+			err = tc.CloseWrite()
 		}
 	default:
 		return experimentalsys.EINVAL

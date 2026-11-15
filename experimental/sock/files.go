@@ -32,8 +32,11 @@ func Open(mod api.Module, f experimentalsys.File) (int32, error) {
 }
 
 // Attach makes the file descriptor fd of mod refer to conn, a
-// *net.TCPListener or *net.TCPConn, which the guest can then use with
-// sock_accept, sock_recv, sock_send, sock_shutdown and poll_oneoff. The file
+// *net.TCPListener, *net.TCPConn or *net.UDPConn, which the guest can then
+// use with sock_accept (listeners), sock_recv, sock_send, sock_shutdown
+// (TCP), fd_read, fd_write and poll_oneoff. A UDP socket reads and writes
+// datagrams; sending to and receiving from other addresses than a connected
+// one is up to host functions, with Lookup. The file
 // fd referred to is dropped without being closed, and if it was in
 // non-blocking mode, conn is too. Closing the descriptor closes conn.
 func Attach(mod api.Module, fd int32, conn any) error {
@@ -47,6 +50,8 @@ func Attach(mod api.Module, fd int32, conn any) error {
 		f = sysfs.NewTCPListenerFile(c)
 	case *net.TCPConn:
 		f = sysfs.NewTCPConnFile(c)
+	case *net.UDPConn:
+		f = sysfs.NewUDPConnFile(c)
 	default:
 		return fmt.Errorf("unsupported socket type %T", conn)
 	}
@@ -66,7 +71,7 @@ func Attach(mod api.Module, fd int32, conn any) error {
 }
 
 // Lookup returns what the file descriptor fd of mod refers to: the
-// *net.TCPListener or *net.TCPConn of a TCP socket, or else the
+// *net.TCPListener, *net.TCPConn or *net.UDPConn of a socket, or else the
 // experimentalsys.File, such as one given to Open.
 func Lookup(mod api.Module, fd int32) (any, bool) {
 	fsc, err := fsContext(mod)

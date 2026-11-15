@@ -218,3 +218,84 @@ func Test_blockingCallsStopOnContextDone(t *testing.T) {
 		})
 	}
 }
+
+func Test_sockAttachUDP(t *testing.T) {
+	mod, r, _ := requireProxyModule(t, wazero.NewModuleConfig())
+	defer r.Close(testCtx)
+
+	peer, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	defer peer.Close() //nolint
+	conn, err := net.DialUDP("udp4", nil, peer.LocalAddr().(*net.UDPAddr))
+	require.NoError(t, err)
+
+	fd, err := experimentalsock.Open(mod, &pendingSocket{nonblock: true})
+	require.NoError(t, err)
+	require.NoError(t, experimentalsock.Attach(mod, fd, conn))
+	got, ok := experimentalsock.Lookup(mod, fd)
+	require.True(t, ok)
+	require.Equal(t, any(conn), got)
+
+	// One iovec at 0 for a buffer at 64, and the result at 32.
+	iovec := func(n uint32) {
+		require.True(t, mod.Memory().WriteUint32Le(0, 64))
+		require.True(t, mod.Memory().WriteUint32Le(4, n))
+	}
+
+	// Nothing to read yet, in non-blocking mode.
+	iovec(16)
+	requireErrnoResult(t, wasip1.ErrnoAgain, mod, wasip1.FdReadName, uint64(fd), 0, 1, 32)
+
+	// Writing sends a datagram to the connected address.
+	ready, _ := pollSockets(t, mod, pollSub{userData: 1, eventType: wasip1.EventTypeFdWrite, fd: uint32(fd)})
+	require.Equal(t, []uint64{1}, ready)
+	require.True(t, mod.Memory().Write(64, []byte("ping")))
+	iovec(4)
+	requireErrnoResult(t, wasip1.ErrnoSuccess, mod, wasip1.FdWriteName, uint64(fd), 0, 1, 32)
+	buf := make([]byte, 16)
+	require.NoError(t, peer.SetReadDeadline(time.Now().Add(5*time.Second)))
+	n, from, err := peer.ReadFromUDP(buf)
+	require.NoError(t, err)
+	require.Equal(t, "ping", string(buf[:n]))
+	require.Equal(t, conn.LocalAddr().String(), from.String())
+
+	// A datagram from it makes the socket readable.
+	_, err = peer.WriteToUDP([]byte("pong"), from)
+	require.NoError(t, err)
+	ready, _ = pollSockets(t, mod, pollSub{userData: 2, eventType: wasip1.EventTypeFdRead, fd: uint32(fd)})
+	require.Equal(t, []uint64{2}, ready)
+	iovec(16)
+	requireErrnoResult(t, wasip1.ErrnoSuccess, mod, wasip1.FdReadName, uint64(fd), 0, 1, 32)
+	read, _ := mod.Memory().ReadUint32Le(32)
+	data, _ := mod.Memory().Read(64, read)
+	require.Equal(t, "pong", string(data))
+
+	// Closing the descriptor closes the socket.
+	requireErrnoResult(t, wasip1.ErrnoSuccess, mod, wasip1.FdCloseName, uint64(fd))
+	_, err = conn.Write([]byte("x"))
+	require.Error(t, err)
+}
+
+// An fd event answered right away, here an error, ends the wait.
+func Test_pollOneoff_answeredDoesNotWait(t *testing.T) {
+	mod, r, _ := requireProxyModule(t, wazero.NewModuleConfig().WithSysNanosleep())
+	defer r.Close(testCtx)
+
+	fd, err := experimentalsock.Open(mod, &pendingSocket{})
+	require.NoError(t, err)
+	const in, out, resultNevents = 0, 1024, 2048
+	subs := make([]byte, 96)
+	subs[8] = wasip1.EventTypeFdWrite
+	binary.LittleEndian.PutUint32(subs[16:], uint32(fd))
+	subs[48+8] = wasip1.EventTypeClock
+	binary.LittleEndian.PutUint64(subs[48+24:], uint64(5*time.Second))
+	require.True(t, mod.Memory().Write(in, subs))
+	start := time.Now()
+	requireErrnoResult(t, wasip1.ErrnoSuccess, mod, wasip1.PollOneoffName, in, out, 2, resultNevents)
+	require.True(t, time.Since(start) < time.Second, "waited %v", time.Since(start))
+	// The clock is reported too, as wazero always does.
+	nevents, _ := mod.Memory().ReadUint32Le(resultNevents)
+	require.Equal(t, uint32(2), nevents)
+	evt, _ := mod.Memory().Read(out, 32)
+	require.Equal(t, uint16(wasip1.ErrnoNotsup), binary.LittleEndian.Uint16(evt[8:]))
+}

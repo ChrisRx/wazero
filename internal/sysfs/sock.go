@@ -88,10 +88,12 @@ func (f *tcpListenerFile) hostFd() (uintptr, bool) {
 
 var _ socketapi.TCPConn = (*tcpConnFile)(nil)
 
+// tcpConnFile is a TCP connection, or a UDP socket, which reads, writes
+// and polls the same way.
 type tcpConnFile struct {
 	baseSockFile
 
-	tc *net.TCPConn
+	tc sockConn
 
 	// nonblock is true when the underlying connection is flagged as non-blocking.
 	// This ensures that reads and writes return experimentalsys.EAGAIN without blocking the caller.
@@ -100,9 +102,22 @@ type tcpConnFile struct {
 	closed bool
 }
 
+// sockConn is a *net.TCPConn or *net.UDPConn.
+type sockConn interface {
+	net.Conn
+	syscall.Conn
+}
+
 // NewTCPConnFile creates a socketapi.TCPConn for a given *net.TCPConn.
 func NewTCPConnFile(tc *net.TCPConn) socketapi.TCPConn {
 	return newTcpConn(tc)
+}
+
+// NewUDPConnFile creates a socketapi.TCPConn for a given *net.UDPConn,
+// bound or connected. Reads and writes are datagrams, and Shutdown is not
+// supported.
+func NewUDPConnFile(uc *net.UDPConn) socketapi.TCPConn {
+	return &tcpConnFile{tc: uc}
 }
 
 func newTcpConn(tc *net.TCPConn) socketapi.TCPConn {
@@ -212,8 +227,8 @@ func connFd(conn syscall.Conn, closed bool) (fd uintptr, ok bool) {
 	return fd, errno == 0
 }
 
-// SockConn returns the *net.TCPListener or *net.TCPConn behind a TCP socket
-// file.
+// SockConn returns the *net.TCPListener, *net.TCPConn or *net.UDPConn
+// behind a socket file.
 func SockConn(f experimentalsys.File) (any, bool) {
 	switch f := f.(type) {
 	case *tcpListenerFile:
