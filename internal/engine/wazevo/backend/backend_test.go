@@ -2228,6 +2228,7 @@ L0 (SSA Block: blk0):
 	str x1, [x0, #0x8]
 	ldr x8, [x0, #0x4b0]
 	movz x9, #0x1b, lsl 0
+	movk x9, #0x50, lsl 32
 	mov x1, x9
 	bl x8
 	ldr x8, [sp, #0x10]

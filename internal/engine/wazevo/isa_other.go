@@ -28,6 +28,4 @@ func adjustClonedStack(oldsp, oldTop, sp, fp, top uintptr) {
 	panic("unsupported architecture")
 }
 
-func rebaseRestoredWindow(sp, size, fp, oldTop, top uintptr) {
-	panic("unsupported architecture")
-}
+const tryTableEnterReturnAddressSize = 0

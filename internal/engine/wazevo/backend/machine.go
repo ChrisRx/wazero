@@ -99,6 +99,25 @@ type (
 		// call the stack grow builtin function.
 		CompileStackGrowCallSequence() []byte
 
+		// CompileTryTableEnter returns the stub compiled code calls to enter a
+		// try_table, with the execution context and the encoded enter code
+		// (wazevoapi.TryTableEnterCode) as arguments. It writes the next try
+		// handler record (wazevoapi.TryRecordSize) without exiting to Go:
+		// the stack and frame pointers, its own return address, the
+		// callee-saved registers, and a locals save area taken from the
+		// arena. It increments the handler depth, sets the caught clause
+		// index to -1 and returns. Out of records or arena, it calls the
+		// trampoline at ExecutionContextOffsetTryTableGrowTrampolineAddress
+		// with the same arguments, then tries again.
+		CompileTryTableEnter() []byte
+
+		// CompileTryTableResume returns the stub that resumes a caught try
+		// handler, entered from Go with the stack and frame pointers of the
+		// enter call's caller and the callee-saved registers in the execution
+		// context: it restores them and jumps to
+		// ExecutionContextOffsetTryResumeAddress.
+		CompileTryTableResume() []byte
+
 		// CompileEntryPreamble returns the sequence of instructions shared by multiple functions to
 		// enter the function from Go.
 		CompileEntryPreamble(signature *ssa.Signature) []byte

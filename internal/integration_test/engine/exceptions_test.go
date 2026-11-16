@@ -65,6 +65,9 @@ var ehBrOwnLabelWasm []byte
 //go:embed testdata/eh_stack_grow.wasm
 var ehStackGrowWasm []byte
 
+//go:embed testdata/eh_nested_deep.wasm
+var ehNestedDeepWasm []byte
+
 //go:embed testdata/eh_catch_outside.wasm
 var ehCatchOutsideWasm []byte
 
@@ -122,6 +125,9 @@ func runEHTests(t *testing.T, cfg wazero.RuntimeConfig) {
 	t.Run("stack_grow", func(t *testing.T) {
 		testEHStackGrow(t, cfg)
 	})
+	t.Run("nested_deep", func(t *testing.T) {
+		testEHNestedDeep(t, cfg)
+	})
 }
 
 // testEHStackGrow throws to a try_table after its body grew (and so moved)
@@ -143,6 +149,26 @@ func testEHStackGrow(t *testing.T, cfg wazero.RuntimeConfig) {
 	res, err := run.Call(ctx, 100)
 	require.NoError(t, err)
 	require.Equal(t, uint64(42+1000+20000), res[0])
+}
+
+// testEHNestedDeep keeps many try_tables open at once, with many locals:
+// more than the first allocation of handler records and locals space hold.
+func testEHNestedDeep(t *testing.T, cfg wazero.RuntimeConfig) {
+	ctx := context.Background()
+	r := wazero.NewRuntimeWithConfig(ctx, cfg)
+	defer r.Close(ctx)
+
+	mod, err := r.Instantiate(ctx, ehNestedDeepWasm)
+	require.NoError(t, err)
+	nest, pass := mod.ExportedFunction("nest"), mod.ExportedFunction("pass")
+	for _, depth := range []uint64{0, 1, 20, 300, 1000, 5} {
+		res, err := nest.Call(ctx, depth)
+		require.NoError(t, err)
+		require.Equal(t, depth, res[0], "nest %d", depth)
+		res, err = pass.Call(ctx, depth)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1005), res[0], "pass %d", depth)
+	}
 }
 
 // testEHCrossFrameCatch is the core reproducer for the interpreter bug:

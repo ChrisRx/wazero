@@ -80,7 +80,51 @@ const (
 	// currently active. Compiled code decrements it when leaving a try_table,
 	// so leaving doesn't exit to Go; the dispatch loop drops handlers beyond it.
 	ExecutionContextOffsetTryHandlerDepth Offset = 1256
+	// ExecutionContextOffsetTryRecordsBase is the address of the try handler
+	// records (see TryRecordSize): record -1, a sentinel, then one per
+	// active handler, record i at base + (i+1)*TryRecordSize.
+	ExecutionContextOffsetTryRecordsBase Offset = 1264
+	// ExecutionContextOffsetTryRecordsCap is the number of handler records
+	// there's room for, the sentinel not counted.
+	ExecutionContextOffsetTryRecordsCap Offset = 1272
+	// ExecutionContextOffsetTryTableGrowTrampolineAddress is the address of
+	// the Go trampoline the native try_table enter stub calls when it's out
+	// of records or locals space.
+	ExecutionContextOffsetTryTableGrowTrampolineAddress Offset = 1280
+	// ExecutionContextOffsetTryResumeAddress is where the try_table resume
+	// stub jumps to: the return address of the caught handler's enter call.
+	ExecutionContextOffsetTryResumeAddress Offset = 1288
 )
+
+// A try handler record, written by the native try_table enter stub (see
+// backend.Machine.CompileTryTableEnter) and read in Go. All fields are 8
+// bytes, registers 16.
+const (
+	// TryRecordSize is the size of a record, a power of two.
+	TryRecordSize      = 512
+	TryRecordSizeLog2  = 9
+	TryRecordSP        = 0  // stack pointer in the enter stub
+	TryRecordFP        = 8  // frame pointer (amd64)
+	TryRecordReturn    = 16 // return address of the enter call
+	TryRecordCode      = 24 // the encoded enter exit code: try_table ID, locals size
+	TryRecordModuleCtx = 32 // the caller's module context
+	TryRecordLocals    = 40 // the locals save area for the handler
+	// TryRecordArenaEnd and TryRecordArenaLimit delimit where the next
+	// record's locals save area goes, in chunk TryRecordArenaChunk.
+	TryRecordArenaEnd   = 48
+	TryRecordArenaLimit = 56
+	TryRecordArenaChunk = 64
+	// TryRecordRegisters is where the callee-saved registers are saved, in
+	// the order of executionContext.savedRegisters.
+	TryRecordRegisters = 80
+)
+
+// TryTableEnterCode encodes the argument to the try_table enter stub: the
+// try_table ID, and the size of the locals save area it needs (0 for none,
+// or when it shares its enclosing try_table's).
+func TryTableEnterCode(tryTableID int, localsSize int) uint64 {
+	return uint64(ExitCodeTryTableEnter|ExitCode(tryTableID<<8)) | uint64(localsSize)<<32
+}
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,
 // This is unique per module.

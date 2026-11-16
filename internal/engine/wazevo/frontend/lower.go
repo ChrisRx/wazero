@@ -3719,7 +3719,11 @@ func (c *Compiler) lowerCurrentOpcode() {
 			// Back to the original block: call the try_table enter trampoline,
 			// then dispatch on the caught clause index.
 			builder.SetCurrentBlock(currentBlk)
-			encodedExitCode := uint64(wazevoapi.ExitCodeTryTableEnter | wazevoapi.ExitCode(tryTableID<<8))
+			localsSize := 0
+			if c.tryTableDepth == 0 {
+				localsSize = numLocals * 16
+			}
+			encodedExitCode := wazevoapi.TryTableEnterCode(tryTableID, localsSize)
 
 			// Load trampoline address from execCtx.
 			enterPtr := builder.AllocateInstruction().

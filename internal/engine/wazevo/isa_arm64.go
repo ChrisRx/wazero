@@ -31,6 +31,6 @@ func adjustClonedStack(oldsp, oldTop, sp, fp, top uintptr) {
 	//  at the expense of slightly costly stack growth, we need to adjust the pushed frame pointers.
 }
 
-// rebaseRestoredWindow is a no-op on arm64, whose frames keep no absolute
-// stack addresses (see adjustClonedStack).
-func rebaseRestoredWindow(sp, size, fp, oldTop, top uintptr) {}
+// tryTableEnterReturnAddressSize is 0: the call to the try_table enter stub
+// leaves its return address in lr.
+const tryTableEnterReturnAddressSize = 0

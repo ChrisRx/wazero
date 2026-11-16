@@ -46,6 +46,10 @@ func (m mockMachine) CompileStackGrowCallSequence() []byte {
 	panic("TODO")
 }
 
+func (m mockMachine) CompileTryTableEnter() []byte { panic("TODO") }
+
+func (m mockMachine) CompileTryTableResume() []byte { panic("TODO") }
+
 // CompileGoFunctionTrampoline implements Machine.CompileGoFunctionTrampoline.
 func (m mockMachine) CompileGoFunctionTrampoline(wazevoapi.ExitCode, *ssa.Signature, bool) []byte {
 	panic("TODO")

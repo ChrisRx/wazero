@@ -43,51 +43,19 @@ type (
 		execCtxPtr        uintptr
 		numberOfResults   int
 		stackIteratorImpl stackIterator
-		// tryHandlers is the stack of active try_table exception handlers,
-		// used to match catch clauses when a throw exits to the dispatch loop.
-		tryHandlers []tryHandler
+		// tryRecords holds the try handler records the native try_table enter
+		// stub writes (see wazevoapi.TryRecordSize): a sentinel, then one per
+		// active handler, as many as execCtx.tryHandlerDepth.
+		tryRecords []tryRecord
+		// tryArena holds the chunks the locals save areas of try handlers are
+		// taken from, in nesting order (see growTryHandlers).
+		tryArena [][][2]uint64
+		// tryTableResumeAddress is the address of the stub resuming a caught
+		// try handler.
+		tryTableResumeAddress *byte
 		// pendingException holds the most recently caught exception, so handler
 		// code can read its params after re-entry.
 		pendingException *wasm.Exception
-	}
-
-	// tryHandler records the state at a try_table entry for exception handling.
-	// On match, execution resumes in the live stack, in the frame that entered
-	// the try_table, by returning from its enter trampoline at returnAddress.
-	//
-	// The stack isn't copied: frames at and below the entering one are the
-	// same as at entry, and in the entering frame itself each value has its
-	// own spill slot, so values live into the handler are still there (values
-	// in callee-saved registers are in savedRegisters). Only the enter
-	// trampoline's own frame, at the top of the stack at entry, is gone by the
-	// time of a throw, so window keeps a copy of the top of the stack, which
-	// is written back before resuming.
-	tryHandler struct {
-		// relSp and relFp are the trampoline's stack and frame pointers,
-		// relative to the stack top, which stay valid when the stack grows
-		// (cloneStack keeps the layout relative to the top).
-		relSp, relFp uintptr
-		// top is the stack top at entry, to rebase window if the stack moved.
-		top            uintptr
-		returnAddress  *byte
-		savedRegisters [64][2]uint64
-		// window is a copy of the top of the stack from the trampoline's stack
-		// pointer, tryTableWindowSize bytes or less.
-		window []byte
-		// catchClauses describes what exceptions this handler catches.
-		catchClauses []wazevoapi.CatchClauseInstance
-		// localsSaveArea is a heap buffer where locals are mirrored inside
-		// try bodies. Handlers read from it to get updated values.
-		// Nil for nested same-function try_tables that reuse the enclosing
-		// handler's save area.
-		localsSaveArea []uint64
-		// localsBuf keeps localsSaveArea's buffer for reuse by the next
-		// handler in this slot.
-		localsBuf []uint64
-		// moduleInstance is the module that set up this try handler.
-		// Used for tag matching in doHandleException (the tag index in
-		// catch clauses is relative to this module's tag index space).
-		moduleInstance *wasm.ModuleInstance
 	}
 
 	// executionContext is the struct to be read/written by assembly functions.
@@ -166,8 +134,17 @@ type (
 		memclrAddress uintptr
 		// tryHandlerDepth is the number of active try_table handlers: entering
 		// one (in the dispatch loop) sets it, and compiled code decrements it
-		// when leaving one. Handlers in tryHandlers beyond it are stale.
+		// when leaving one.
 		tryHandlerDepth uint64
+		// tryRecordsBase is the address of callEngine.tryRecords, and
+		// tryRecordsCap the number of handlers there's room for.
+		tryRecordsBase uintptr
+		tryRecordsCap  uint64
+		// tryTableGrowTrampolineAddress holds the address of the trampoline
+		// the try_table enter stub calls to grow tryRecords or the arena.
+		tryTableGrowTrampolineAddress *byte
+		// tryResumeAddress is where the try_table resume stub jumps to.
+		tryResumeAddress *byte
 	}
 )
 
@@ -296,8 +273,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 	}
 
 	// Clear any stale try_table handlers from a previous call.
-	c.tryHandlers = c.tryHandlers[:0]
-	c.execCtx.tryHandlerDepth = 0
+	c.resetTryHandlers()
 
 	var paramResultPtr *uint64
 	if len(paramResultStack) > 0 {
@@ -352,8 +328,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 		if err != nil {
 			// Ensures that we can reuse this callEngine even after an error.
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
-			c.tryHandlers = c.tryHandlers[:0]
-			c.execCtx.tryHandlerDepth = 0
+			c.resetTryHandlers()
 		}
 	}()
 
@@ -384,6 +359,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 				return err
 			}
 			adjustClonedStack(oldsp, oldTop, newsp, newfp, c.stackTop)
+			c.rebaseTryHandlers(oldTop, c.stackTop)
 			// Old stack must be alive until the new stack is adjusted.
 			runtime.KeepAlive(oldStack)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
@@ -632,52 +608,10 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 		case wazevoapi.ExitCodeNullReference:
 			panic(wasmruntime.ErrRuntimeNullReference)
 		case wazevoapi.ExitCodeTryTableEnter:
-			// Save current state as a try handler checkpoint using stack cloning
-			// (same approach as experimental.Snapshot).
-			// The encoded exit code (with tryTableID in upper bits) is on the
-			// Go call stack as the second trampoline argument, not in execCtx.exitCode.
-			tryTableEnterStack := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
-			tryTableID := wazevoapi.TryTableIDFromExitCode(wazevoapi.ExitCode(tryTableEnterStack[0]))
-			mod := c.callerModuleInstance()
-			me := mod.Engine.(*moduleEngine)
-			info := &me.parent.tryTableInfo[tryTableID]
-			c.dropLeftTryHandlers()
-			n := len(c.tryHandlers)
-			if n < cap(c.tryHandlers) {
-				c.tryHandlers = c.tryHandlers[:n+1]
-			} else {
-				c.tryHandlers = append(c.tryHandlers, tryHandler{})
-			}
-			h := &c.tryHandlers[n]
-			sp := uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall))
-			size := c.stackTop - sp
-			if size > tryTableWindowSize {
-				size = tryTableWindowSize
-			}
-			h.window = append(h.window[:0], unsafe.Slice(*(**byte)(unsafe.Pointer(&sp)), size)...)
-			h.relSp = c.stackTop - sp
-			h.relFp = c.stackTop - c.execCtx.framePointerBeforeGoCall
-			h.top = c.stackTop
-			h.returnAddress = c.execCtx.goCallReturnAddress
-			h.savedRegisters = c.execCtx.savedRegisters
-			h.catchClauses = info.CatchClauses
-			h.moduleInstance = mod
-
-			// A buffer for locals so handlers can read throw-time values.
-			// Nested try_tables in the same function (ReuseLocals) share the enclosing handler's save area.
-			h.localsSaveArea = nil
-			if info.NumLocals > 0 && !info.ReuseLocals {
-				need := info.NumLocals * 2 // 16 bytes per local
-				if cap(h.localsBuf) < need {
-					h.localsBuf = make([]uint64, need)
-				}
-				h.localsSaveArea = h.localsBuf[:need]
-				c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&h.localsSaveArea[0]))
-			}
-			c.execCtx.tryHandlerDepth = uint64(len(c.tryHandlers))
-			// Set clauseIdx = -1 (no exception) in execCtx for the compiled code
-			// to read after the trampoline returns.
-			c.execCtx.caughtExceptionClauseIdx = -1
+			// The native enter stub is out of handler records or locals
+			// space: make room, and it tries again.
+			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
+			c.growTryHandlers(s[0] >> 32)
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
@@ -685,11 +619,9 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			// Compiled code leaves try_tables itself (decrementing
 			// tryHandlerDepth), but pop here too for code that calls the
 			// trampoline.
-			c.dropLeftTryHandlers()
-			if len(c.tryHandlers) > 0 {
-				c.tryHandlers = c.tryHandlers[:len(c.tryHandlers)-1]
-				c.execCtx.tryHandlerDepth = uint64(len(c.tryHandlers))
-				c.restoreLocalsSaveAreaPtr(len(c.tryHandlers) - 1)
+			if d := c.execCtx.tryHandlerDepth; d > 0 {
+				c.execCtx.tryHandlerDepth = d - 1
+				c.execCtx.localsSaveAreaPtr = uintptr(c.tryRecord(int(d) - 2)[wazevoapi.TryRecordLocals/8])
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
@@ -700,19 +632,20 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 	}
 }
 
-// doHandleException tries to match the given exception against active try handlers.
-// If a match is found, it restores the execution state to the handler's checkpoint
-// (like snapshot.doRestore) and writes the matched clause index as the trampoline
-// return value. Returns true if handled.
+// doHandleException tries to match the given exception against the active
+// try handlers, innermost first. On a match, it pops the handlers at and
+// above it and sets up the execution context to resume it (by the resume
+// stub, at the return address of its enter call) with the matched clause
+// index. Returns true if handled.
 func (c *callEngine) doHandleException(exn *wasm.Exception) bool {
-	c.dropLeftTryHandlers()
-	// Search try handlers from innermost (last) to outermost (first).
-	for i := len(c.tryHandlers) - 1; i >= 0; i-- {
-		h := &c.tryHandlers[i]
-		for clauseIdx, clause := range h.catchClauses {
-			// Use the module that set up the handler (not the one that threw)
-			// because clause.TagIndex is relative to that module's tag space.
-			mod := h.moduleInstance
+	for i := int(c.execCtx.tryHandlerDepth) - 1; i >= 0; i-- {
+		r := c.tryRecord(i)
+		tryTableID := wazevoapi.TryTableIDFromExitCode(wazevoapi.ExitCode(r[wazevoapi.TryRecordCode/8]))
+		// The tag index in catch clauses is relative to the module that
+		// entered the try_table, not the one that threw.
+		mod := moduleInstanceFromOpaquePtr(*(**byte)(unsafe.Pointer(&r[wazevoapi.TryRecordModuleCtx/8])))
+		info := &mod.Engine.(*moduleEngine).parent.tryTableInfo[tryTableID]
+		for clauseIdx, clause := range info.CatchClauses {
 			matched := false
 			switch clause.Kind {
 			case wasm.CatchKindCatch, wasm.CatchKindCatchRef:
@@ -720,66 +653,114 @@ func (c *callEngine) doHandleException(exn *wasm.Exception) bool {
 			case wasm.CatchKindCatchAll, wasm.CatchKindCatchAllRef:
 				matched = true
 			}
-			if matched {
-				// Restore localsSaveAreaPtr from the matched handler or
-				// the nearest enclosing one (same-function reuse).
-				c.restoreLocalsSaveAreaPtr(i)
-
-				// Restore the top of the stack as it was at entry, in the live
-				// stack, which may have moved since (relSp and relFp are
-				// relative to its top).
-				sp := c.stackTop - h.relSp
-				fp := c.stackTop - h.relFp
-				copy(unsafe.Slice(*(**byte)(unsafe.Pointer(&sp)), len(h.window)), h.window)
-				if c.stackTop != h.top {
-					rebaseRestoredWindow(sp, uintptr(len(h.window)), fp, h.top, c.stackTop)
-				}
-				ec := &c.execCtx
-				ec.stackPointerBeforeGoCall = *(**uint64)(unsafe.Pointer(&sp))
-				ec.framePointerBeforeGoCall = fp
-				ec.goCallReturnAddress = h.returnAddress
-				ec.savedRegisters = h.savedRegisters
-
-				// Pop all handlers at and above this one.
-				c.tryHandlers = c.tryHandlers[:i]
-				ec.tryHandlerDepth = uint64(i)
-
-				// Store the caught exception so handler code can read params.
-				c.pendingException = exn
-
-				// Set the matched clause index in execCtx for compiled code to read.
-				ec.caughtExceptionClauseIdx = int64(clauseIdx)
-				return true
+			if !matched {
+				continue
 			}
+			ec := &c.execCtx
+			ec.localsSaveAreaPtr = uintptr(r[wazevoapi.TryRecordLocals/8])
+			regs := r[wazevoapi.TryRecordRegisters/8:]
+			for j := range ec.savedRegisters[:len(regs)/2] {
+				ec.savedRegisters[j] = [2]uint64{regs[2*j], regs[2*j+1]}
+			}
+			// The stack as the enter call's caller had it, after the call.
+			sp := uintptr(r[wazevoapi.TryRecordSP/8]) + tryTableEnterReturnAddressSize
+			ec.stackPointerBeforeGoCall = *(**uint64)(unsafe.Pointer(&sp))
+			ec.framePointerBeforeGoCall = uintptr(r[wazevoapi.TryRecordFP/8])
+			ec.goCallReturnAddress = c.tryTableResumeAddress
+			ec.tryResumeAddress = *(**byte)(unsafe.Pointer(&r[wazevoapi.TryRecordReturn/8]))
+			ec.tryHandlerDepth = uint64(i)
+			// Store the caught exception so handler code can read params.
+			c.pendingException = exn
+			ec.caughtExceptionClauseIdx = int64(clauseIdx)
+			return true
 		}
 	}
 	return false
 }
 
-// tryTableWindowSize bounds the copy of the top of the stack each try_table
-// entry keeps (tryHandler.window). It only has to cover the enter
-// trampoline's frame, which is much smaller.
-const tryTableWindowSize = 512
+// tryRecord is a try handler record (see wazevoapi.TryRecordSize).
+type tryRecord [wazevoapi.TryRecordSize / 8]uint64
 
-// dropLeftTryHandlers drops the handlers of try_tables that compiled code has
-// left since (it decrements tryHandlerDepth without exiting to Go).
-func (c *callEngine) dropLeftTryHandlers() {
-	if d := int(c.execCtx.tryHandlerDepth); d < len(c.tryHandlers) {
-		c.tryHandlers = c.tryHandlers[:d]
-	}
+// tryRecord returns the record of the i-th active handler, the sentinel for -1.
+func (c *callEngine) tryRecord(i int) *tryRecord {
+	return &c.tryRecords[i+1]
 }
 
-// restoreLocalsSaveAreaPtr walks tryHandlers from index `from` downward
-// and sets localsSaveAreaPtr to the first handler that owns a save area,
-// or clears it if none is found.
-func (c *callEngine) restoreLocalsSaveAreaPtr(from int) {
-	for i := from; i >= 0; i-- {
-		if sa := c.tryHandlers[i].localsSaveArea; len(sa) > 0 {
-			c.execCtx.localsSaveAreaPtr = uintptr(unsafe.Pointer(&sa[0]))
-			return
+// tryArenaChunkSize is the minimum size of a chunk of the locals arena.
+const tryArenaChunkSize = 64 << 10
+
+// resetTryHandlers drops all try handlers, and points the sentinel record
+// at the start of the arena.
+func (c *callEngine) resetTryHandlers() {
+	c.execCtx.tryHandlerDepth = 0
+	c.execCtx.localsSaveAreaPtr = 0
+	if len(c.tryRecords) == 0 {
+		return
+	}
+	s := c.tryRecord(-1)
+	*s = tryRecord{}
+	if len(c.tryArena) == 0 {
+		s[wazevoapi.TryRecordArenaChunk/8] = ^uint64(0) // -1: none yet
+		return
+	}
+	c.setTryArena(s, 0)
+}
+
+// setTryArena makes the record r's arena (where the next record's locals
+// save area goes) chunk i of the arena.
+func (c *callEngine) setTryArena(r *tryRecord, i int) {
+	chunk := c.tryArena[i]
+	start := uintptr(unsafe.Pointer(&chunk[0]))
+	r[wazevoapi.TryRecordArenaEnd/8] = uint64(start)
+	r[wazevoapi.TryRecordArenaLimit/8] = uint64(start + uintptr(len(chunk))*16)
+	r[wazevoapi.TryRecordArenaChunk/8] = uint64(i)
+}
+
+// growTryHandlers makes room for the record of the next try handler, and a
+// locals save area of localsSize bytes for it.
+//
+// Save areas are taken from the arena in nesting order, each record keeping
+// where the next one's goes, so leaving a try_table frees its area without
+// doing anything. An area can't move, compiled code holds pointers to it,
+// so when a chunk is full, the next handlers take theirs from a new one,
+// the chunk after it. Chunks after the one the innermost handler's next area
+// would come from are free.
+func (c *callEngine) growTryHandlers(localsSize uint64) {
+	depth := int(c.execCtx.tryHandlerDepth)
+	if n := len(c.tryRecords) - 1; depth >= n {
+		records := make([]tryRecord, max(16, 2*n, depth+1)+1)
+		copy(records, c.tryRecords)
+		fresh := len(c.tryRecords) == 0
+		c.tryRecords = records
+		c.execCtx.tryRecordsBase = uintptr(unsafe.Pointer(&records[0]))
+		c.execCtx.tryRecordsCap = uint64(len(records) - 1)
+		if fresh {
+			c.resetTryHandlers()
 		}
 	}
-	c.execCtx.localsSaveAreaPtr = 0
+	prev := c.tryRecord(depth - 1)
+	if prev[wazevoapi.TryRecordArenaEnd/8]+localsSize <= prev[wazevoapi.TryRecordArenaLimit/8] {
+		return
+	}
+	i := int(int64(prev[wazevoapi.TryRecordArenaChunk/8])) + 1
+	size := max(tryArenaChunkSize, int(localsSize)) / 16
+	if i == len(c.tryArena) {
+		c.tryArena = append(c.tryArena, nil)
+	}
+	if len(c.tryArena[i]) < size {
+		c.tryArena[i] = make([][2]uint64, size)
+	}
+	c.setTryArena(prev, i)
+}
+
+// rebaseTryHandlers adjusts the stack and frame pointers in the records of
+// the active try handlers after the stack moved from oldTop to top.
+func (c *callEngine) rebaseTryHandlers(oldTop, top uintptr) {
+	for i := range int(c.execCtx.tryHandlerDepth) {
+		r := c.tryRecord(i)
+		r[wazevoapi.TryRecordSP/8] = uint64(uintptr(r[wazevoapi.TryRecordSP/8]) - oldTop + top)
+		r[wazevoapi.TryRecordFP/8] = uint64(uintptr(r[wazevoapi.TryRecordFP/8]) - oldTop + top)
+	}
 }
 
 func (c *callEngine) callerModuleInstance() *wasm.ModuleInstance {

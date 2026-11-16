@@ -3,8 +3,6 @@
 package wazevo
 
 import (
-	"unsafe"
-
 	"github.com/ChrisRx/wazero/internal/engine/wazevo/backend"
 	"github.com/ChrisRx/wazero/internal/engine/wazevo/backend/isa/amd64"
 )
@@ -31,15 +29,6 @@ func adjustClonedStack(oldsp, oldTop, sp, fp, top uintptr) {
 	amd64.AdjustClonedStack(oldsp, oldTop, sp, fp, top)
 }
 
-// rebaseRestoredWindow fixes the frame pointers saved in a try_table's copy of
-// the top of the stack (tryHandler.window), written back at sp after the stack
-// moved from oldTop to top: the saved RBPs, starting at fp, that are inside it
-// still point into the old stack. Saved RBPs beyond it are in live frames,
-// which growing the stack already rebased.
-func rebaseRestoredWindow(sp, size, fp, oldTop, top uintptr) {
-	for cur := fp; cur >= sp && cur+8 <= sp+size; {
-		p := *(**uintptr)(unsafe.Pointer(&cur))
-		*p = *p - oldTop + top
-		cur = *p
-	}
-}
+// tryTableEnterReturnAddressSize is the size of the return address the call
+// to the try_table enter stub pushes.
+const tryTableEnterReturnAddressSize = 8
