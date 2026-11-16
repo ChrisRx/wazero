@@ -76,6 +76,10 @@ const (
 	ExecutionContextOffsetLocalsSaveAreaPtr Offset = 1240
 	// ExecutionContextOffsetMemclrAddress is the offset of `memclrAddress` in executionContext.
 	ExecutionContextOffsetMemclrAddress Offset = 1248
+	// ExecutionContextOffsetTryHandlerDepth is the number of try_table handlers
+	// currently active. Compiled code decrements it when leaving a try_table,
+	// so leaving doesn't exit to Go; the dispatch loop drops handlers beyond it.
+	ExecutionContextOffsetTryHandlerDepth Offset = 1256
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

@@ -30,3 +30,7 @@ func adjustClonedStack(oldsp, oldTop, sp, fp, top uintptr) {
 	//  so no need to adjustment on arm64. However, when we make it absolute, which in my opinion is better perf-wise
 	//  at the expense of slightly costly stack growth, we need to adjust the pushed frame pointers.
 }
+
+// rebaseRestoredWindow is a no-op on arm64, whose frames keep no absolute
+// stack addresses (see adjustClonedStack).
+func rebaseRestoredWindow(sp, size, fp, oldTop, top uintptr) {}

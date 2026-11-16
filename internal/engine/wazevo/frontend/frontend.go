@@ -89,6 +89,11 @@ type Compiler struct {
 	// emit extra stores to the locals save area so handler blocks can read
 	// throw-time values.
 	tryTableDepth int
+	// localsSaveAreaVariable holds this function's locals save area pointer,
+	// loaded once when its outermost try_table is entered. Callees enter and
+	// leave their own try_tables without restoring execCtx's pointer (leaving
+	// doesn't exit to Go), so it mustn't be reloaded from there.
+	localsSaveAreaVariable ssa.Variable
 
 	// Following are reused for the known safe bounds analysis.
 
@@ -452,6 +457,7 @@ func (c *Compiler) declareNecessaryVariables() {
 		c.memoryBaseVariable = c.ssaBuilder.DeclareVariable(ssa.TypeI64)
 		c.memoryLenVariable = c.ssaBuilder.DeclareVariable(ssa.TypeI64)
 	}
+	c.localsSaveAreaVariable = c.ssaBuilder.DeclareVariable(ssa.TypeI64)
 
 	c.globalVariables = c.globalVariables[:0]
 	c.mutableGlobalVariablesIndexes = c.mutableGlobalVariablesIndexes[:0]

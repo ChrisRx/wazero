@@ -4734,7 +4734,7 @@ func (c *Compiler) loadLocalsSaveAreaPtr() ssa.Value {
 // storeLocalToSaveArea emits a store of the given local value to the
 // heap-allocated locals save area.
 func (c *Compiler) storeLocalToSaveArea(localIdx wasm.Index, val ssa.Value) {
-	ptr := c.loadLocalsSaveAreaPtr()
+	ptr := c.ssaBuilder.MustFindValue(c.localsSaveAreaVariable)
 	store := c.ssaBuilder.AllocateInstruction()
 	store.AsStore(ssa.OpcodeStore, val, ptr, uint32(localIdx)*16)
 	c.ssaBuilder.InsertInstruction(store)
@@ -4744,7 +4744,9 @@ func (c *Compiler) storeLocalToSaveArea(localIdx wasm.Index, val ssa.Value) {
 // and redefines the SSA variables, so handler blocks see throw-time values.
 func (c *Compiler) reloadLocalsFromSaveArea() {
 	builder := c.ssaBuilder
+	// The dispatch loop set execCtx's pointer to the catching handler's area.
 	ptr := c.loadLocalsSaveAreaPtr()
+	builder.DefineVariableInCurrentBB(c.localsSaveAreaVariable, ptr)
 	numParams := len(c.wasmFunctionTyp.Params)
 	numLocals := numParams + len(c.wasmFunctionLocalTypes)
 	for i := 0; i < numLocals; i++ {
@@ -4764,10 +4766,15 @@ func (c *Compiler) reloadLocalsFromSaveArea() {
 	}
 }
 
-// storeAllLocalsToSaveArea stores all locals to the save area at once.
+// storeAllLocalsToSaveArea stores all locals to the save area at once. The
+// outermost try_table of the function takes the area the dispatch loop just
+// allocated; nested ones in the same function share it.
 func (c *Compiler) storeAllLocalsToSaveArea() {
 	builder := c.ssaBuilder
-	ptr := c.loadLocalsSaveAreaPtr()
+	if c.tryTableDepth == 0 {
+		builder.DefineVariableInCurrentBB(c.localsSaveAreaVariable, c.loadLocalsSaveAreaPtr())
+	}
+	ptr := builder.MustFindValue(c.localsSaveAreaVariable)
 	numParams := len(c.wasmFunctionTyp.Params)
 	numLocals := numParams + len(c.wasmFunctionLocalTypes)
 	for i := 0; i < numLocals; i++ {
@@ -4780,20 +4787,18 @@ func (c *Compiler) storeAllLocalsToSaveArea() {
 	}
 }
 
-// emitTryTableLeave emits a trampoline call to pop the try handler in the dispatch loop.
+// emitTryTableLeave pops the innermost try handler: it decrements
+// execCtx.tryHandlerDepth in place, without exiting to Go. The dispatch loop
+// drops handlers beyond the depth when it next looks at them.
 func (c *Compiler) emitTryTableLeave() {
 	builder := c.ssaBuilder
-	c.storeCallerModuleContext()
-
-	leavePtr := builder.AllocateInstruction().
-		AsLoad(c.execCtxPtrValue,
-			wazevoapi.ExecutionContextOffsetTryTableLeaveTrampolineAddress.U32(),
-			ssa.TypeI64,
-		).Insert(builder).Return()
-
-	args := c.allocateVarLengthValues(1, c.execCtxPtrValue)
+	depth := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetTryHandlerDepth.U32(), ssa.TypeI64).
+		Insert(builder).Return()
+	one := builder.AllocateInstruction().AsIconst64(1).Insert(builder).Return()
+	decremented := builder.AllocateInstruction().AsIsub(depth, one).Insert(builder).Return()
 	builder.AllocateInstruction().
-		AsCallIndirect(leavePtr, &c.tryTableLeaveSig, args).
+		AsStore(ssa.OpcodeStore, decremented, c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetTryHandlerDepth.U32()).
 		Insert(builder)
 }
 

@@ -62,6 +62,9 @@ var ehLocalsCrossFuncWasm []byte
 //go:embed testdata/eh_br_own_label.wasm
 var ehBrOwnLabelWasm []byte
 
+//go:embed testdata/eh_stack_grow.wasm
+var ehStackGrowWasm []byte
+
 //go:embed testdata/eh_catch_outside.wasm
 var ehCatchOutsideWasm []byte
 
@@ -116,6 +119,30 @@ func runEHTests(t *testing.T, cfg wazero.RuntimeConfig) {
 	t.Run("catch_outside", func(t *testing.T) {
 		testEHCatchOutside(t, cfg)
 	})
+	t.Run("stack_grow", func(t *testing.T) {
+		testEHStackGrow(t, cfg)
+	})
+}
+
+// testEHStackGrow throws to a try_table after its body grew (and so moved)
+// the stack, through callees that entered and left try_tables of their own.
+func testEHStackGrow(t *testing.T, cfg wazero.RuntimeConfig) {
+	ctx := context.Background()
+	r := wazero.NewRuntimeWithConfig(ctx, cfg)
+	defer r.Close(ctx)
+
+	mod, err := r.Instantiate(ctx, ehStackGrowWasm)
+	require.NoError(t, err)
+	run := mod.ExportedFunction("run")
+	for _, depth := range []uint64{0, 10, 300, 1000} {
+		res, err := run.Call(ctx, depth)
+		require.NoError(t, err)
+		require.Equal(t, uint64(42+1000+20000), res[0], "depth %d", depth)
+	}
+	// Again on the same module, with no stale handlers left behind.
+	res, err := run.Call(ctx, 100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(42+1000+20000), res[0])
 }
 
 // testEHCrossFrameCatch is the core reproducer for the interpreter bug:
